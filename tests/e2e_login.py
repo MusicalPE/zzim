@@ -9,8 +9,7 @@ def ok(c,m):
     print(('PASS ' if c else 'FAIL ')+m); 
     if not c: fails.append(m)
 STUB=open(ROOT/'tests'/'fbstub.js').read()
-src=open(ROOT/'index.html').read().replace("const FIREBASE_CONFIG = null;","const FIREBASE_CONFIG = {apiKey:'x',projectId:'x'};",1)
-FB=ROOT/'tests'/'_fb_index.html'; open(FB,'w').write(src)
+FB=ROOT/'index.html'  # 파이어베이스 주소는 가짜(fbstub.js)로 바꿔 끼워서 진짜 서버에는 닿지 않음
 async def main():
     async with async_playwright() as p:
         b=await p.chromium.launch(executable_path=CHROME,args=['--no-sandbox'])

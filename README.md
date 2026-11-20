@@ -30,7 +30,7 @@
 
 ## 파일
 
-- `index.html` 화면·규칙·저장이 모두 들어 있는 한 장짜리 앱. 맨 위 `FIREBASE_CONFIG` 가 비어 있으면 체험 모드로 열립니다.
+- `index.html` 화면·규칙·저장이 모두 들어 있는 한 장짜리 앱. 맨 위 `FIREBASE_CONFIG` 에 파이어베이스(zzim-pe) 설정이 들어 있습니다. 주소 뒤에 `?demo` 를 붙이면 체험 모드로 열립니다.
 - `firebase-rules.txt` 파이어베이스 설정 순서와 Firestore 보안 규칙
 - `tests/` 시험 파일
 

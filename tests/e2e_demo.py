@@ -3,7 +3,7 @@ import asyncio, os, pathlib
 from playwright.async_api import async_playwright
 ROOT=pathlib.Path(__file__).resolve().parent.parent
 CHROME=os.environ.get('CHROME','/usr/bin/google-chrome')
-URL=(ROOT/'index.html').as_uri()+'?test=1'
+URL=(ROOT/'index.html').as_uri()+'?test=1&demo'
 fails=[]
 def ok(c,m):
     print(('PASS ' if c else 'FAIL ')+m)

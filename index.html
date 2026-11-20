@@ -152,10 +152,17 @@ footer{text-align:center;color:var(--sub);font-size:12px;padding:24px 0}
 <script>
 /* ============================================================
    찜! 체육 공간 예약판   만든이: 음악적체육인
-   - FIREBASE_CONFIG 가 비어 있으면 '체험 모드'(이 기기에만 저장)로 동작
-   - 파이어베이스 웹 앱 설정을 붙여 넣으면 학교판(모든 선생님이 함께 봄)으로 동작
+   - 주소 뒤에 ?demo 를 붙이면 '체험 모드'(이 기기에만 저장)로 동작
+   - 그냥 열면 학교판(구글 로그인, 모든 선생님이 함께 봄)으로 동작
    ============================================================ */
-const FIREBASE_CONFIG = null;
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyCS1Eh1cpelGdMoLPq0g0X6KLJawz6RNKY",
+  authDomain: "zzim-pe.firebaseapp.com",
+  projectId: "zzim-pe",
+  storageBucket: "zzim-pe.firebasestorage.app",
+  messagingSenderId: "570522130727",
+  appId: "1:570522130727:web:e29b8be4c287a1af92b102"
+};
 /* 예시)
 const FIREBASE_CONFIG = {
   apiKey: "...", authDomain: "....firebaseapp.com", projectId: "...",
