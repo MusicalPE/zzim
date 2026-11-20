@@ -1,0 +1,22 @@
+찜! 체육 공간 예약판 - 파이어베이스 설정 안내 (1.1.0 구글 로그인판)
+
+1. 파이어베이스 콘솔에서 새 프로젝트를 만들고 웹 앱을 추가합니다.
+2. Authentication > 로그인 방법 > 'Google'을 사용 설정합니다.
+   (예전 안내의 '익명' 로그인은 이제 쓰지 않으니 켜지 않아도 됩니다.)
+3. Authentication > 설정 > 승인된 도메인에 앱을 올릴 주소를 더합니다.
+   예: musicalpe.github.io
+4. Firestore Database를 만들고, 규칙 탭에 아래 내용을 붙여 넣고 게시합니다.
+5. 웹 앱 설정(apiKey 등)을 index.html 맨 위 FIREBASE_CONFIG 자리에 붙여 넣습니다.
+
+---------- 여기부터 규칙 ----------
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /jjim/{schoolCode} {
+      allow read, write: if request.auth != null
+                         && request.auth.token.firebase.sign_in_provider == 'google.com'
+                         && schoolCode.matches('^[a-z0-9]{4,20}$');
+    }
+  }
+}
+---------- 여기까지 ----------
