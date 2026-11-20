@@ -12,7 +12,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="찜!">
-<meta property="og:title" content="찜! 체육 공간 작전판">
+<meta property="og:title" content="찜! 체육 공간 예약판">
 <meta property="og:description" content="체육 수업이 먼저, 빈 시간은 콕 찜해서 신청 · 강당·운동장 예약판">
 <meta property="og:url" content="https://musicalpe.github.io/zzim/">
 <meta property="og:image" content="https://musicalpe.github.io/zzim/og.jpg">
@@ -204,7 +204,7 @@ const FIREBASE_CONFIG = {
   storageBucket: "...", messagingSenderId: "...", appId: "..."
 };
 */
-const VERSION = '1.5.1';
+const VERSION = '1.5.2';
 const BETA = true;            // 시험판 표시 (앱 모음에 공개할 때 false 로)
 const FEEDBACK_URL = 'https://musicalpe.github.io/hearim/?p=vcxwx2';      // 의견 받기 설문 주소 (헤아림). 비어 있으면 '의견 보내기' 단추가 숨겨짐
 const DOW = ['일','월','화','수','목','금','토'];
@@ -933,7 +933,7 @@ function teacherBtn(t, act){
   return `<button data-act="${act}" data-id="${t.id}"><span class="mag ${t.kind==='pe'?'red':t.kind==='homeroom'?'blue':'gray'}">${esc(t.cls||t.name.slice(0,1))}</span>${esc(t.name)} <span class="muted">${kindLabel(t)}${t.cls?' · '+esc(t.cls):''}${t.admin?' · 관리자':''}</span></button>`;
 }
 function renderLogin(){
-  let h = `<div class="login">${BETA?`<div class="beta-note">시험판이에요. 써 보시면서 불편한 점이나 바라는 점을 ${FEEDBACK_URL?`<a href="${esc(FEEDBACK_URL)}" target="_blank" rel="noopener">의견 보내기</a>로`:'알려'} 주세요.</div>`:''}<div class="logo"><img src="icons/icon-192.png" alt="" class="login-mark"><br>찜<b>!</b></div><div class="tag">체육 공간 작전판 · 체육 수업이 먼저, 빈 시간은 신청으로</div><div class="card">`;
+  let h = `<div class="login">${BETA?`<div class="beta-note">시험판이에요. 써 보시면서 불편한 점이나 바라는 점을 ${FEEDBACK_URL?`<a href="${esc(FEEDBACK_URL)}" target="_blank" rel="noopener">의견 보내기</a>로`:'알려'} 주세요.</div>`:''}<div class="logo"><img src="icons/icon-192.png" alt="" class="login-mark"><br>찜<b>!</b></div><div class="tag">체육 공간 예약판 · 체육 수업이 먼저, 빈 시간은 신청으로</div><div class="card">`;
   const acct = AUTH ? `<p class="muted">${esc(AUTH.email||AUTH.displayName||'')} 계정 · <button class="ghost small" data-act="signout">다른 계정</button></p>` : '';
   if(DEMO){
     if(!S){ h+=`<p>불러오는 중...</p>`; }
