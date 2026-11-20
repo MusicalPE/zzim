@@ -160,12 +160,18 @@ table.tt td.has{background:#fde3de}
 .small{font-size:12px}
 footer{text-align:center;color:var(--sub);font-size:12px;padding:24px 0}
 .err{color:var(--danger);font-size:13px;margin-top:6px}
+.invite{display:flex;gap:18px;align-items:flex-start;flex-wrap:wrap}
+.qrbox{background:#fff;border:2px solid var(--line);border-radius:12px;padding:8px;line-height:0}
+.qr{image-rendering:pixelated}
+.invite-txt{flex:1;min-width:220px}.invite-txt p{margin:0 0 8px}
+.url{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;word-break:break-all;background:#f3f1ea;padding:6px 8px;border-radius:8px}
 .choice{display:flex;gap:8px;align-items:center;width:100%;text-align:left;margin-bottom:6px;border-radius:12px}
 </style>
 </head>
 <body>
 <div id="app"></div>
 <div id="modal"></div>
+<script src="lib/qrcode.js"></script>
 <script>
 /* ============================================================
    찜! 체육 공간 예약판   만든이: 음악적체육인
@@ -186,7 +192,7 @@ const FIREBASE_CONFIG = {
   storageBucket: "...", messagingSenderId: "...", appId: "..."
 };
 */
-const VERSION = '1.1.1';
+const VERSION = '1.2.0';
 const DOW = ['일','월','화','수','목','금','토'];
 const DEADLINE_HOUR = 15;     // 사용 전날(앞 수업일) 오후 3시 마감
 const KEEP_DAYS = 70;         // 이보다 오래된 기록은 정리
@@ -213,6 +219,24 @@ function dateLabel(date){ const d=parseYmd(date); return (d.getMonth()+1)+'월 '
 function fmtTime(iso){ const d=new Date(iso); return (d.getMonth()+1)+'/'+d.getDate()+' '+pad(d.getHours())+':'+pad(d.getMinutes()); }
 
 /* 사용 전 '앞 수업일' 오후 3시 (월요일 칸이면 금요일 오후 3시) */
+/* 학교 코드 자동 생성 (헷갈리는 글자 0·o·1·l·i 빼기) */
+function genCode(){ const a='abcdefghjkmnpqrstuvwxyz23456789'; let c=''; for(let i=0;i<6;i++) c+=a[Math.floor(Math.random()*a.length)]; return c; }
+function inviteUrl(code){ return location.origin + location.pathname + '?school=' + encodeURIComponent(code); }
+function qrImg(text, px){
+  try{ const q=qrcode(0,'M'); q.addData(text); q.make(); const n=q.getModuleCount()+4; const cell=Math.max(2,Math.floor(px/n));
+    return `<img class="qr" alt="초대 QR" src="${q.createDataURL(cell,2)}" style="width:${px}px;height:${px}px">`; }
+  catch(e){ return '<p class="muted">QR을 만들지 못했어요. 아래 주소를 보내 주세요.</p>'; }
+}
+async function copyText(t){ try{ await navigator.clipboard.writeText(t); toast('복사했어요. 카톡이나 메신저에 붙여 넣으세요.'); }catch(e){ toast('복사하지 못했어요. 주소를 길게 눌러 복사해 주세요.'); } }
+function inviteBlock(px){
+  const code = DEMO ? 'demo' : ui.code;
+  const url = inviteUrl(code);
+  return `<div class="invite"><div class="qrbox">${qrImg(url, px)}</div><div class="invite-txt">
+    <p>선생님들께 이 QR을 보여 주거나 주소를 보내 주세요. 찍고 구글로 로그인하면 우리 학교로 바로 들어와요.</p>
+    <p class="url">${esc(url)}</p>
+    <p class="muted">학교 코드: <b>${esc(code)}</b>${DEMO?' (체험 모드라 실제로는 들어갈 수 없어요)':''}</p>
+    <div class="row"><button class="pri" data-act="copy-invite">주소 복사</button>${px<300?'<button data-act="invite-big">크게 보기</button>':''}</div></div></div>`;
+}
 function deadlineOf(date){
   let d = addDays(parseYmd(date), -1);
   while(d.getDay()===0 || d.getDay()===6) d = addDays(d,-1);
@@ -627,6 +651,7 @@ function renderModal(){
   if(md.type==='slot') body = slotModal(md.k);
   else if(md.type==='rainpick') body = rainModal(md.k);
   else if(md.type==='switch') body = switchModal();
+  else if(md.type==='invite') body = `<h2>${md.fresh?'학교를 만들었어요':'선생님 초대'}</h2>${inviteBlock(260)}<div class="acts"><button data-act="close">닫기</button></div>`;
   m.innerHTML = `<div class="modal-bg" data-act="close-bg"><div class="modal">${body}</div></div>`;
 }
 function slotModal(k){
@@ -742,10 +767,9 @@ function renderSettings(){
   if(!ui.ttPlace || !s.places.some(p=>p.id===ui.ttPlace)) ui.ttPlace = s.places[0] && s.places[0].id;
   const pes = s.teachers.filter(t=>t.kind==='pe');
   if(!ui.ttTeacher || !pes.some(t=>t.id===ui.ttTeacher)) ui.ttTeacher = pes[0] ? pes[0].id : ME.id;
-  let h = `<div class="card"><h2>학교 정보</h2>
+  let h = `<div class="card"><h2>선생님 초대</h2>${inviteBlock(180)}</div><div class="card"><h2>학교 정보</h2>
     <div class="field"><label>학교 이름</label><input id="set-name" value="${esc(s.school.name)}"></div>
     <div class="field"><label>학급 목록 (쉼표로 구분, 예: 3-1, 3-2, 4-1)</label><input id="set-classes" value="${esc(s.school.classes.join(', '))}"></div>
-    ${!DEMO?`<p class="muted">학교 코드: <b>${esc(ui.code)}</b> — 다른 선생님들께 이 코드를 알려 주세요.</p>`:''}
     <button class="pri" data-act="save-school">저장</button></div>`;
   h += `<div class="card"><h2>교시와 시작 시간</h2><div class="row">
     ${s.school.periods.map(p=>`<span class="field" style="margin:0"><label>${p.no}교시 시작</label><input type="time" data-per="${p.no}" value="${p.start}" style="width:120px"></span>`).join('')}
@@ -789,13 +813,13 @@ function renderLogin(){
   } else if(ui.loginStep==='boot' || ui.loginStep==='loading'){
     h += `<p>불러오는 중...</p>`;
   } else if(ui.loginStep==='signin'){
-    h += `<h2>들어가기</h2><p class="muted">학교 선생님 모두 각자 구글 계정으로 들어와요.</p><button class="pri" data-act="google">구글 계정으로 로그인</button>`;
+    h += `<h2>들어가기</h2><p class="muted">${ui.inviteCode?'우리 학교 예약판에 초대받았어요. ':''}학교 선생님 모두 각자 구글 계정으로 들어와요.</p><button class="pri" data-act="google">구글 계정으로 로그인</button>`;
   } else if(ui.loginStep==='code'){
     h += `<h2>학교 코드</h2>${acct}<div class="field"><input id="in-code" placeholder="학교 코드 (영문·숫자)" value="${esc(ui.code)}"></div>
-      <button class="pri" data-act="code-go">들어가기</button> <button data-act="new-school">우리 학교 처음 만들기</button><div id="err" class="err"></div>`;
+      <button class="pri" data-act="code-go">들어가기</button> <button data-act="new-school">우리 학교 처음 만들기</button><div id="err" class="err"></div>
+      <p class="muted" style="margin-top:12px">체육 선생님께 받은 초대 QR을 찍으면 코드 없이 바로 들어와요.</p>`;
   } else if(ui.loginStep==='newschool'){
-    h += `<h2>우리 학교 만들기</h2>${acct}<p class="muted">만든 사람이 관리자(체육 선생님)가 돼요.</p>
-      <div class="field"><label>학교 코드 (영문 소문자·숫자 4~20자, 선생님들께 알려 줄 코드)</label><input id="ns-code"></div>
+    h += `<h2>우리 학교 만들기</h2>${acct}<p class="muted">만든 사람이 관리자(체육 선생님)가 돼요. 학교 코드는 자동으로 만들어지고, 다른 선생님들은 QR로 들어와요.</p>
       <div class="field"><label>학교 이름</label><input id="ns-name"></div>
       <div class="field"><label>내 이름</label><input id="ns-me" value="${esc(AUTH&&AUTH.displayName||'')}"></div>
       <button class="pri" data-act="ns-go">만들기</button> <button data-act="to-code">뒤로</button><div id="err" class="err"></div>`;
@@ -816,7 +840,7 @@ function registerForm(){
     <button class="pri" data-act="rg-go">등록하고 들어가기</button> ${DEMO?`<button data-act="demo-back">뒤로</button>`:`<button data-act="to-code">다른 학교</button>`}<div id="err" class="err"></div>`;
 }
 function showErr(t){ const e=document.getElementById('err'); if(e) e.textContent=t; else toast(t); }
-function login(t){ ME=t; if(S && (!ui.place || !S.places.some(p=>p.id===ui.place))) ui.place = S.places[0] && S.places[0].id; if(DEMO) safeSet('jjim:session', JSON.stringify({code:ui.code, id:t.id})); ui.view='board'; ui.modal=null; ui.loginStep='in'; render(); }
+function login(t){ ME=t; if(S && (!ui.place || !S.places.some(p=>p.id===ui.place))) ui.place = S.places[0] && S.places[0].id; if(DEMO) safeSet('jjim:session', JSON.stringify({code:ui.code, id:t.id})); ui.view='board'; ui.loginStep='in'; ui.modal=null; if(ui.freshInvite){ ui.freshInvite=false; ui.modal={type:'invite',fresh:true}; } render(); }
 
 /* ============================================================
    눌렀을 때
@@ -845,6 +869,8 @@ document.addEventListener('click', async e=>{
     case 'place': ui.place=id; render(); break;
     case 'slot': ui.modal={type:'slot',k}; renderModal(); break;
     case 'close': ui.modal=null; renderModal(); break;
+    case 'copy-invite': await copyText(inviteUrl(DEMO?'demo':ui.code)); break;
+    case 'invite-big': ui.modal={type:'invite'}; renderModal(); break;
     case 'release': if(await act((s,me)=>A.release(s,me,k))) toast('비웠어요. 다른 선생님들이 신청할 수 있어요.'); break;
     case 'unrelease': if(await act((s,me)=>A.unrelease(s,me,k))) toast('다시 체육 수업 칸으로 돌렸어요.'); break;
     case 'bid': if(await act((s,me)=>A.bid(s,me,k))) toast('신청했어요. 마감 뒤 결과가 알림으로 와요.'); break;
@@ -925,13 +951,13 @@ document.addEventListener('click', async e=>{
     case 'new-school': ui.loginStep='newschool'; render(); break;
     case 'to-code': if(unsub){ try{unsub();}catch(err){} unsub=null; } S=null; ui.loginStep='code'; render(); break;
     case 'ns-go': {
-      const code=document.getElementById('ns-code').value.trim().toLowerCase();
       const name=document.getElementById('ns-name').value.trim();
       const me=document.getElementById('ns-me').value.trim();
-      if(!/^[a-z0-9]{4,20}$/.test(code)) return showErr('학교 코드는 영문 소문자·숫자 4~20자예요.');
       if(!name||!me) return showErr('학교 이름과 내 이름을 넣어 주세요.');
-      const st=new FireStore(code);
-      if(await st.exists()) return showErr('이미 있는 학교 코드예요. 다른 코드를 써 주세요.');
+      let code='', st=null;
+      for(let i=0;i<6;i++){ const c=genCode(); const t=new FireStore(c); if(!(await t.exists())){ code=c; st=t; break; } }
+      if(!st) return showErr('학교 코드를 만들지 못했어요. 다시 눌러 주세요.');
+      ui.freshInvite=true;
       const s0=emptySchool(name);
       s0.teachers.push({id:AUTH.uid, name:me, kind:'pe', cls:'', admin:true, email:AUTH.email||''});
       await st.create(s0); safeSet('jjim:lastcode', code);
@@ -981,6 +1007,8 @@ setInterval(()=>{ if(S) onState(S); }, 60000);
     if(sess && sess.code===code && S){ const t=teacherOf(S,sess.id); if(t){ ME=t; render(); } }
     return;
   }
+  { const m = location.search.match(/[?&]school=([a-z0-9]{4,20})/);
+    if(m){ safeSet('jjim:lastcode', m[1]); ui.inviteCode=m[1]; try{ history.replaceState(null,'',location.pathname); }catch(e){} } }
   ui.loginStep='boot'; render();
   try{ await initFirebase(); }catch(e){ document.getElementById('app').innerHTML='<div class="wrap"><div class="card">파이어베이스에 연결하지 못했어요. 인터넷 연결이나 설정을 확인해 주세요.</div></div>'; return; }
   firebase.auth().onAuthStateChanged(async user=>{
@@ -992,6 +1020,9 @@ setInterval(()=>{ if(S) onState(S); }, 60000);
       ui.code=last; ui.loginStep='loading'; render();
       let ex=false; try{ ex = await new FireStore(last).exists(); }catch(e){}
       if(ex){ await openSchool(last); return; }
+      safeDel('jjim:lastcode');
+      ui.loginStep='code'; render(); showErr(ui.inviteCode? '초대 주소의 학교를 찾을 수 없어요. 체육 선생님께 QR을 다시 받아 주세요.' : '지난번 학교를 찾을 수 없어요. 학교 코드를 넣어 주세요.');
+      return;
     }
     ui.loginStep='code'; render();
   });
