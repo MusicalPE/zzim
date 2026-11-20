@@ -171,7 +171,8 @@ table.grid tr.lunchrow td.per b{color:var(--yellow)}
 .beta{display:inline-block;margin-left:8px;padding:1px 8px;border-radius:999px;background:var(--yellow);color:#3a2e05;font-size:12px;font-weight:700;vertical-align:2px}
 nav.tabs a.fb{color:var(--yellow);text-decoration:none;padding:6px 12px;border-radius:999px;font-size:15px}
 nav.tabs a.fb:hover{background:rgba(255,255,255,.08)}
-.beta-note{background:#fff6d9;border:2px solid #f2c230;border-radius:12px;padding:10px 14px;font-size:14px;margin-bottom:14px;text-align:center}
+.beta-note a{white-space:nowrap;color:#7a3e00;font-weight:700}
+.beta-note{word-break:keep-all;background:#fff6d9;border:2px solid #f2c230;border-radius:12px;padding:10px 14px;font-size:14px;margin-bottom:14px;text-align:center}
 .blockbox{margin-top:12px;border-top:2px dashed var(--line);padding-top:10px}
 .blockbox summary{cursor:pointer;font-weight:700;color:var(--sub)}
 .mergelist{display:flex;flex-wrap:wrap;gap:6px 14px;margin:8px 0}
@@ -204,7 +205,7 @@ const FIREBASE_CONFIG = {
   storageBucket: "...", messagingSenderId: "...", appId: "..."
 };
 */
-const VERSION = '1.5.2';
+const VERSION = '1.5.3';
 const BETA = true;            // 시험판 표시 (앱 모음에 공개할 때 false 로)
 const FEEDBACK_URL = 'https://musicalpe.github.io/hearim/?p=vcxwx2';      // 의견 받기 설문 주소 (헤아림). 비어 있으면 '의견 보내기' 단추가 숨겨짐
 const DOW = ['일','월','화','수','목','금','토'];
@@ -933,7 +934,7 @@ function teacherBtn(t, act){
   return `<button data-act="${act}" data-id="${t.id}"><span class="mag ${t.kind==='pe'?'red':t.kind==='homeroom'?'blue':'gray'}">${esc(t.cls||t.name.slice(0,1))}</span>${esc(t.name)} <span class="muted">${kindLabel(t)}${t.cls?' · '+esc(t.cls):''}${t.admin?' · 관리자':''}</span></button>`;
 }
 function renderLogin(){
-  let h = `<div class="login">${BETA?`<div class="beta-note">시험판이에요. 써 보시면서 불편한 점이나 바라는 점을 ${FEEDBACK_URL?`<a href="${esc(FEEDBACK_URL)}" target="_blank" rel="noopener">의견 보내기</a>로`:'알려'} 주세요.</div>`:''}<div class="logo"><img src="icons/icon-192.png" alt="" class="login-mark"><br>찜<b>!</b></div><div class="tag">체육 공간 예약판 · 체육 수업이 먼저, 빈 시간은 신청으로</div><div class="card">`;
+  let h = `<div class="login">${BETA?`<div class="beta-note">시험판이에요. 써 보시고 ${FEEDBACK_URL?`<a href="${esc(FEEDBACK_URL)}" target="_blank" rel="noopener">의견 보내기</a>로`:''} 불편한 점을 알려 주세요.</div>`:''}<div class="logo"><img src="icons/icon-192.png" alt="" class="login-mark"><br>찜<b>!</b></div><div class="tag">체육 공간 예약판 · 체육 수업이 먼저, 빈 시간은 신청으로</div><div class="card">`;
   const acct = AUTH ? `<p class="muted">${esc(AUTH.email||AUTH.displayName||'')} 계정 · <button class="ghost small" data-act="signout">다른 계정</button></p>` : '';
   if(DEMO){
     if(!S){ h+=`<p>불러오는 중...</p>`; }
