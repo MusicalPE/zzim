@@ -172,6 +172,8 @@ table.grid tr.lunchrow td.per b{color:var(--yellow)}
 nav.tabs a.fb{color:var(--yellow);text-decoration:none;padding:6px 12px;border-radius:999px;font-size:15px}
 nav.tabs a.fb:hover{background:rgba(255,255,255,.08)}
 .beta-note{background:#fff6d9;border:2px solid #f2c230;border-radius:12px;padding:10px 14px;font-size:14px;margin-bottom:14px;text-align:center}
+.blockbox{margin-top:12px;border-top:2px dashed var(--line);padding-top:10px}
+.blockbox summary{cursor:pointer;font-weight:700;color:var(--sub)}
 .choice{display:flex;gap:8px;align-items:center;width:100%;text-align:left;margin-bottom:6px;border-radius:12px}
 </style>
 </head>
@@ -199,7 +201,7 @@ const FIREBASE_CONFIG = {
   storageBucket: "...", messagingSenderId: "...", appId: "..."
 };
 */
-const VERSION = '1.3.1';
+const VERSION = '1.4.0';
 const BETA = true;            // 시험판 표시 (앱 모음에 공개할 때 false 로)
 const FEEDBACK_URL = '';      // 의견 받기 설문 주소 (헤아림). 비어 있으면 '의견 보내기' 단추가 숨겨짐
 const DOW = ['일','월','화','수','목','금','토'];
@@ -277,6 +279,23 @@ function isPE(t){ return t && (t.kind==='pe'); }
 function canManage(t){ return t && (t.admin || t.kind==='pe'); }
 
 /* ---------- 칸 상태 계산 ---------- */
+/* 막은 칸: 하루만(blocks[skey]) 또는 매주 같은 요일(blocksWeekly[tkey]) */
+function blockOf(s, placeId, date, period){
+  const one = (s.blocks||{})[skey(placeId,date,period)];
+  if(one) return {...one, weekly:false};
+  const w = (s.blocksWeekly||{})[tkey(placeId, parseYmd(date).getDay(), period)];
+  if(w && (!w.from || date >= w.from)) return {...w, weekly:true};
+  return null;
+}
+/* 점심시간 신청 학년 (요일별). 비어 있으면 모든 학년 */
+function lunchGradesOf(s, dow){ const g=((s.school.lunch||{}).grades||{})[dow]; return Array.isArray(g)&&g.length ? g : null; }
+function gradeOf(t){ const m=(t&&t.cls||'').match(/^(\d+)-/); return m?Number(m[1]):null; }
+function lunchAllowed(s, me, date){
+  if(!(me.kind==='homeroom' && me.cls)) return {ok:false, why:'점심시간은 담임 선생님이 반 이름으로 신청해요.'};
+  const g = lunchGradesOf(s, parseYmd(date).getDay());
+  if(g && !g.includes(gradeOf(me))) return {ok:false, why:`이 요일 점심시간은 ${g.join('·')}학년만 신청할 수 있어요.`};
+  return {ok:true};
+}
 function slotInfo(s, placeId, date, period, t){
   t = t || now();
   const k = skey(placeId,date,period);
@@ -288,10 +307,12 @@ function slotInfo(s, placeId, date, period, t){
   const bids = s.bids[k] || [];
   const past = slotStart(s,date,period) <= t;
   const dl = deadlineOf(date);
-  const base = {k, placeId, date, period, tt, released, booking, rainOut, bids, past, dl};
+  const block = blockOf(s, placeId, date, period);
+  const base = {k, placeId, date, period, tt, released, booking, rainOut, bids, past, dl, block};
   if(rainOut) return {...base, st:'rainout'};
   if(booking) return {...base, st: booking.how==='rain' ? 'rain' : 'booked'};
   if(tt && !released) return {...base, st:'pe'};
+  if(block) return {...base, st:'blocked'};
   if(past) return {...base, st:'pastopen'};
   if(t < dl) return {...base, st:'bidding'};
   return {...base, st: bids.length ? 'resolving' : 'direct'};
@@ -350,7 +371,8 @@ function resolveDue(s, t){
 
 function prune(s, t){
   const cut = ymd(addDays(t||now(), -KEEP_DAYS));
-  for(const box of ['bookings','releases','bids','rain'])
+  if(!s.blocks) s.blocks={}; if(!s.blocksWeekly) s.blocksWeekly={};
+  for(const box of ['bookings','releases','bids','rain','blocks'])
     for(const k in s[box]) if(splitKey(k).date < cut) delete s[box][k];
   s.messages = s.messages.filter(m => m.at.slice(0,10) >= cut);
 }
@@ -373,7 +395,7 @@ const A = {
   },
   bid(s, me, k){
     const {placeId,date,period}=splitKey(k); const i=slotInfo(s,placeId,date,period);
-    if(period===0 && !(me.kind==='homeroom' && me.cls)) return {error:'점심시간은 담임 선생님이 반 이름으로 신청해요.'};
+    if(period===0){ const la=lunchAllowed(s,me,date); if(!la.ok) return {error:la.why}; }
     if(i.st!=='bidding') return {error:'지금은 신청할 수 없는 칸이에요.'};
     const who = whoLabel(me);
     if(i.bids.some(b=>b.teacherId===me.id || b.who===who)) return {error:'이미 신청했어요.'};
@@ -387,7 +409,7 @@ const A = {
   },
   direct(s, me, k){
     const {placeId,date,period}=splitKey(k); const i=slotInfo(s,placeId,date,period);
-    if(period===0 && !(me.kind==='homeroom' && me.cls)) return {error:'점심시간은 담임 선생님이 반 이름으로 신청해요.'};
+    if(period===0){ const la=lunchAllowed(s,me,date); if(!la.ok) return {error:la.why}; }
     if(i.st!=='direct') return {error: i.st==='booked'?'방금 다른 반이 먼저 예약했어요.':'지금은 바로 예약할 수 없는 칸이에요.'};
     s.bookings[k] = {teacherId:me.id, who:whoLabel(me), how:'direct', at:now().toISOString()};
   },
@@ -414,6 +436,7 @@ const A = {
     const ti = slotInfo(s,toPlaceId,f.date,f.period);
     if(ti.st==='pe') return {error:`그 시간 ${toPlace.name}에는 다른 체육 수업(${ti.tt.cls})이 있어요.`};
     if(ti.st==='rain') return {error:`그 시간 ${toPlace.name}은 이미 다른 우천 수업이 쓰고 있어요.`};
+    if(ti.st==='blocked') return {error:`그 시간 ${toPlace.name}은 막아 둔 칸이에요 (${ti.block.reason}).`};
     const when = `${dateLabel(f.date)} ${f.period}교시`;
     const cls = fi.tt.cls;
     if(ti.booking){
@@ -429,6 +452,28 @@ const A = {
       if(t.cls===cls && t.kind==='homeroom')
         pushMsg(s, t.id, `[우천 안내] ${when} ${cls} 체육은 비 때문에 ${placeOf(s,f.placeId).name} 대신 ${toPlace.name}에서 해요.`);
     }
+  },
+  block(s, me, k, reason, weekly){
+    if(!canManage(me)) return {error:'체육 선생님만 막을 수 있어요.'};
+    reason = (reason||'').trim() || '사용 안 함';
+    const {placeId,date,period}=splitKey(k); const i=slotInfo(s,placeId,date,period);
+    if(i.st==='pe' || i.st==='rain' || i.st==='rainout') return {error:'체육 수업 칸은 막을 수 없어요.'};
+    if(!s.blocks) s.blocks={}; if(!s.blocksWeekly) s.blocksWeekly={};
+    const dow = parseYmd(date).getDay();
+    const hit = kk => { const x=splitKey(kk); return x.placeId===placeId && x.period===period && (weekly ? (parseYmd(x.date).getDay()===dow && x.date>=date) : x.date===date); };
+    const where = d => `${placeOf(s,placeId).name} ${dateLabel(d)} ${plabel(period)}`;
+    for(const kk of Object.keys(s.bookings)){ const b=s.bookings[kk]; if(hit(kk) && b.how!=='rain'){ pushMsg(s,b.teacherId,`[취소] ${where(splitKey(kk).date)} — ${reason} 때문에 쓸 수 없게 되어 예약이 취소되었어요.`); delete s.bookings[kk]; } }
+    for(const kk of Object.keys(s.bids)){ if(hit(kk)){ for(const b of s.bids[kk]) pushMsg(s,b.teacherId,`[취소] ${where(splitKey(kk).date)} — ${reason} 때문에 쓸 수 없게 되어 신청이 취소되었어요.`); delete s.bids[kk]; } }
+    if(weekly) s.blocksWeekly[tkey(placeId,dow,period)] = {reason, by:me.id, from:date};
+    else s.blocks[k] = {reason, by:me.id};
+  },
+  unblock(s, me, k){
+    if(!canManage(me)) return {error:'체육 선생님만 풀 수 있어요.'};
+    const {placeId,date,period}=splitKey(k);
+    if(s.blocks && s.blocks[k]){ delete s.blocks[k]; return; }
+    const tk=tkey(placeId,parseYmd(date).getDay(),period);
+    if(s.blocksWeekly && s.blocksWeekly[tk]){ delete s.blocksWeekly[tk]; return; }
+    return {error:'막은 칸이 아니에요.'};
   },
   rainUndo(s, me, fromK){
     const r = s.rain[fromK]; if(!r) return {error:'우천 이동 기록이 없어요.'};
@@ -448,7 +493,7 @@ function emptySchool(name){
   return {
     v:1, school:{name, periods:defaultPeriods(), classes:[]},
     places:[{id:'p_hall',name:'강당',outdoor:false},{id:'p_field',name:'운동장',outdoor:true}],
-    teachers:[], peTimetable:{}, releases:{}, bids:{}, bookings:{}, rain:{}, messages:[]
+    teachers:[], peTimetable:{}, releases:{}, bids:{}, bookings:{}, rain:{}, blocks:{}, blocksWeekly:{}, messages:[]
   };
 }
 function demoSchool(){
@@ -638,6 +683,7 @@ function renderBoard(){
     <span><i class="mag yellow"></i>우리 반</span>
     <span><i class="mag orange"></i>신청한 반</span>
     <span><i class="mag slot"></i>빈 칸</span>
+    <span><i class="mag gray"></i>막은 칸</span>
   </div>
   <p class="board-note">신청 마감은 사용 전 수업일 오후 3시 (월요일 칸은 금요일 3시) · 여러 반이 신청하면 이번 달에 덜 쓴 반 먼저, 같으면 추첨 · 마감 뒤 남은 칸은 먼저 누르는 반이 사용</p></div>`;
   return html;
@@ -663,6 +709,7 @@ function renderCell(i){
       note=`신청 ${i.bids.length}반<small>${mine?'신청함 · ':''}마감 ${dlShort(i.dl)}</small>${rel}`;
       if(mine) extra=' mypick'; break; }
     case 'resolving': mag=`<span class="mag ghost">?</span>`; note='결과 정리 중'; break;
+    case 'blocked': mag=`<span class="mag gray">막음</span>`; note=`${esc(i.block.reason)}<small>${i.block.weekly?'매주':'이날만'}</small>`; break;
     case 'direct': mag=`<span class="mag slot"></span>`; note=`남은 칸<small>바로 예약</small>${rel}`; break;
     case 'pastopen': note=''; break;
   }
@@ -690,7 +737,8 @@ function slotModal(k){
   const acts=[];
   const month = date.slice(0,7);
   const lunch = period===0;
-  const canLunch = ME.kind==='homeroom' && !!ME.cls;
+  const canLunch = lunchAllowed(S, ME, date).ok;
+  if(lunch && !['blocked','pastopen'].includes(i.st)){ const lg=lunchGradesOf(S,parseYmd(date).getDay()); if(lg) h += `<p class="muted">이 요일 점심시간 신청: <b>${lg.join('·')}학년</b></p>`; }
   if(lunch) h += `<p class="lunch-note">${'점심시간 강당 정리와 안전 지도는 신청한 담임 선생님이 맡아요.'}</p>`;
   switch(i.st){
     case 'pe':
@@ -722,7 +770,7 @@ function slotModal(k){
       const mine = i.bids.some(b=>b.teacherId===ME.id);
       if(mine) acts.push(`<button class="warn" data-act="unbid" data-k="${esc(k)}">신청 취소</button>`);
       else if(lunch ? canLunch : (!isPE(ME) || ME.cls)) acts.push(`<button class="pri" data-act="bid" data-k="${esc(k)}">${esc(myWho)} 신청하기${lunch?' (정리·안전 지도 함께)':''}</button>`);
-      else if(lunch) h += `<p class="muted">점심시간은 담임 선생님만 신청할 수 있어요.</p>`;
+      else if(lunch) h += `<p class="muted">${esc(lunchAllowed(S,ME,date).why)}</p>`;
       if(!lunch || canLunch) h += `<p class="muted">우리(${esc(myWho)}) 이번 달 ${lunch?'점심시간 ':''}사용: ${usageInMonth(S,myWho,month,lunch)}회</p>`;
       if(i.released && peOwner) acts.push(`<button data-act="unrelease" data-k="${esc(k)}">다시 체육 수업으로</button>`);
       break; }
@@ -732,10 +780,22 @@ function slotModal(k){
       h += `<span class="status"><i class="mag slot" style="border-color:#999"></i>남은 칸</span><p>신청이 마감되었고 아무도 쓰지 않는 칸이에요. 먼저 누르는 반이 써요.</p>`;
       if(i.released) h+=`<p class="muted">원래 ${esc(i.tt.cls)} 체육 시간인데 체육 선생님이 비운 칸이에요.</p>`;
       if(lunch ? canLunch : (!isPE(ME) || ME.cls)) acts.push(`<button class="pri" data-act="direct" data-k="${esc(k)}">${esc(myWho)} 바로 예약${lunch?' (정리·안전 지도 함께)':''}</button>`);
-      else if(lunch) h += `<p class="muted">점심시간은 담임 선생님만 신청할 수 있어요.</p>`;
+      else if(lunch) h += `<p class="muted">${esc(lunchAllowed(S,ME,date).why)}</p>`;
       if(i.released && peOwner) acts.push(`<button data-act="unrelease" data-k="${esc(k)}">다시 체육 수업으로</button>`);
       break;
     case 'pastopen': h += `<p class="muted">지난 시간이에요.</p>`; break;
+    case 'blocked':
+      h += `<span class="status"><i class="mag gray"></i>막은 칸</span><p><b>${esc(i.block.reason)}</b> 때문에 쓸 수 없어요. <span class="muted">(${i.block.weekly?'매주 같은 요일':'이날만'})</span></p>`;
+      if(canManage(ME)) acts.push(`<button class="warn" data-act="unblock" data-k="${esc(k)}">${i.block.weekly?'매주 막기 풀기':'막기 풀기'}</button>`);
+      break;
+  }
+  if(canManage(ME) && !i.past && ['bidding','direct','booked'].includes(i.st)){
+    h += `<details class="blockbox"><summary>이 칸 막기 (스포츠클럽·행사 등)</summary>
+      <div class="row" style="margin-top:8px"><input id="bl-reason" list="bl-reasons" placeholder="사유" value="${lunch?'스포츠클럽 활동':''}" style="flex:1;min-width:160px">
+      <datalist id="bl-reasons"><option>스포츠클럽 활동</option><option>학교 행사</option><option>시설 점검·공사</option><option>시험·평가</option></datalist>
+      <label class="small"><input type="checkbox" id="bl-weekly" ${lunch?'checked':''}> 매주 ${DOW[parseYmd(date).getDay()]}요일 반복</label>
+      <button class="warn" data-act="block" data-k="${esc(k)}">막기</button></div>
+      <p class="muted">이미 있는 신청·예약은 취소되고 그 선생님께 알림이 가요.</p></details>`;
   }
   acts.push(`<button data-act="close">닫기</button>`);
   return h + `<div class="acts">${acts.join('')}</div>`;
@@ -814,7 +874,13 @@ function renderSettings(){
     <span class="field" style="margin:0"><label>몇 교시 다음</label><select id="lu-after">${s.school.periods.map(p=>`<option value="${p.no}" ${p.no===L.after?'selected':''}>${p.no}교시 다음</option>`).join('')}</select></span>
     <span class="field" style="margin:0"><label>시작</label><input type="time" id="lu-start" value="${L.start}" style="width:120px"></span>
     <span class="field" style="margin:0"><label>끝</label><input type="time" id="lu-end" value="${L.end}" style="width:120px"></span>
-    <button class="pri" data-act="save-lunch">저장</button></div></div>`;
+    <button class="pri" data-act="save-lunch">저장</button></div>
+    <h3>요일별 신청 학년</h3><p class="muted">우선권을 주는 학년만 신청하게 하려면 그 학년만 체크하세요. 모두 체크하거나 모두 비우면 모든 학년이 신청해요.</p>
+    <div style="overflow-x:auto"><table class="tt"><tr><th>요일</th>${[1,2,3,4,5,6].map(g=>`<th>${g}학년</th>`).join('')}</tr>
+    ${[1,2,3,4,5].map(d=>{ const lg=lunchGradesOf(s,d); return `<tr><th>${DOW[d]}</th>${[1,2,3,4,5,6].map(g=>`<td><input type="checkbox" data-lg="${d}-${g}" ${!lg||lg.includes(g)?'checked':''}></td>`).join('')}</tr>`; }).join('')}</table></div>
+    <div class="row" style="margin-top:8px"><button class="pri" data-act="save-lunch-grades">신청 학년 저장</button></div>
+    <h3>매주 막은 칸</h3>${(()=>{ const ws=Object.entries(s.blocksWeekly||{}); return ws.length? `<ul class="list">${ws.map(([tk,w])=>{ const [pid,dw,pr]=tk.split('|'); return `<li><b>${DOW[dw]}요일 ${plabel(pr)}</b> ${esc(placeOf(s,pid).name)} <span class="muted">${esc(w.reason)}</span><span class="sp"></span><button class="small warn" data-act="wblock-del" data-tk="${esc(tk)}">지우기</button></li>`; }).join('')}</ul>` : `<p class="muted">없어요. 예약판에서 칸을 누르고 '이 칸 막기'로 막을 수 있어요.</p>`; })()}
+    </div>`;
   h += `<div class="card"><h2>장소</h2><p class="muted">학교 사정에 맞게 체육 관련 장소를 더하거나 빼세요. '실외'로 표시한 곳의 수업만 비 오는 날 실내로 옮길 수 있어요.</p><ul class="list">
     ${s.places.map(p=>`<li><input data-pname="${p.id}" value="${esc(p.name)}" style="width:160px"><label class="small"><input type="checkbox" data-pout="${p.id}" ${p.outdoor?'checked':''}> 실외</label><label class="small"><input type="checkbox" data-plunch="${p.id}" ${placeHasLunch(p)?'checked':''}> 점심시간 신청</label><span class="sp"></span><button class="small warn" data-act="place-del" data-id="${p.id}">빼기</button></li>`).join('')}
     </ul><div class="row"><input id="new-place" placeholder="예: 다목적실, 무용실, 탁구장"><label class="small"><input type="checkbox" id="new-place-out"> 실외</label><button data-act="place-add">더하기</button><span class="sp"></span><button class="pri" data-act="save-places">이름·실외 저장</button></div></div>`;
@@ -916,6 +982,10 @@ document.addEventListener('click', async e=>{
     case 'direct': if(await act((s,me)=>A.direct(s,me,k))) toast('예약했어요.'); break;
     case 'cancel': if(await act((s,me)=>A.cancel(s,me,k))) { toast('예약을 취소했어요.'); } break;
     case 'rainpick': ui.modal={type:'rainpick',k}; renderModal(); break;
+    case 'block': { const reason=document.getElementById('bl-reason').value, weekly=document.getElementById('bl-weekly').checked;
+      if(await act((s,me)=>A.block(s,me,k,reason,weekly))) toast(weekly?'매주 같은 요일 이 칸을 막았어요.':'이날 이 칸을 막았어요.'); break; }
+    case 'unblock': if(await act((s,me)=>A.unblock(s,me,k))) toast('막기를 풀었어요.'); break;
+    case 'wblock-del': if(await act((s,me)=>{ if(!canManage(me)) return {error:'권한이 없어요.'}; delete s.blocksWeekly[b.dataset.tk]; })) toast('매주 막기를 지웠어요.'); break;
     case 'raindo': { const to=b.dataset.to; if(await act((s,me)=>A.rain(s,me,k,to))){ ui.modal=null; toast('실내로 옮겼어요. 관련 선생님께 안내가 갔어요.'); render(); } break; }
     case 'rainundo': if(await act((s,me)=>A.rainUndo(s,me,k))){ ui.modal=null; toast('우천 이동을 되돌렸어요.'); render(); } break;
 
@@ -953,11 +1023,15 @@ document.addEventListener('click', async e=>{
       if(await act(s=>{ s.places.forEach(p=>{ if(names[p.id]) p.name=names[p.id]; if(p.id in outs) p.outdoor=outs[p.id]; if(p.id in lun) p.lunch=lun[p.id]; }); })) toast('저장했어요.');
       break; }
     case 'ttplace': ui.ttPlace=id; render(); break;
+    case 'save-lunch-grades': {
+      const g={}; for(let d=1;d<=5;d++){ const on=[]; for(let gr=1;gr<=6;gr++){ const x=document.querySelector(`[data-lg="${d}-${gr}"]`); if(x&&x.checked) on.push(gr); } g[d]= on.length===6 ? [] : on; }
+      if(await act(s=>{ s.school.lunch={...(s.school.lunch||{}), grades:g}; })) toast('저장했어요.');
+      break; }
     case 'save-lunch': {
       const on=document.getElementById('lu-on').checked, after=Number(document.getElementById('lu-after').value),
             st=document.getElementById('lu-start').value, en=document.getElementById('lu-end').value;
       if(!st||!en||st>=en) return toast('점심시간 시작과 끝을 확인해 주세요.');
-      if(await act(s=>{ s.school.lunch={after, start:st, end:en, off:!on}; })) toast('저장했어요.');
+      if(await act(s=>{ s.school.lunch={...(s.school.lunch||{}), after, start:st, end:en, off:!on}; })) toast('저장했어요.');
       break; }
     case 't-admin': await act((s,me)=>{ if(!me.admin) return {error:'관리자만 바꿀 수 있어요.'}; const t=teacherOf(s,id); if(t) t.admin=!t.admin; }); break;
     case 't-del': {
