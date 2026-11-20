@@ -4,6 +4,21 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>찜! 체육 공간 예약판</title>
+<meta name="description" content="체육 수업이 먼저, 빈 시간은 콕 찜해서 신청하는 학교 강당·운동장 예약판">
+<meta name="theme-color" content="#1e4a36">
+<link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+<link rel="icon" type="image/png" sizes="64x64" href="icons/favicon-64.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="manifest" href="manifest.webmanifest">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="찜!">
+<meta property="og:title" content="찜! 체육 공간 작전판">
+<meta property="og:description" content="체육 수업이 먼저, 빈 시간은 콕 찜해서 신청 · 강당·운동장 예약판">
+<meta property="og:url" content="https://musicalpe.github.io/zzim/">
+<meta property="og:image" content="https://musicalpe.github.io/zzim/og.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=Noto+Sans+KR:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
@@ -35,6 +50,8 @@ header.top{background:var(--ink);color:#fff;position:sticky;top:0;z-index:5;box-
 header.top .wrap{display:flex;align-items:center;gap:14px;padding-top:9px;padding-bottom:9px;flex-wrap:wrap}
 .logo{font-family:var(--head);font-size:28px;line-height:1;color:#fff;letter-spacing:1px}
 .logo b{color:var(--yellow);font-weight:400}
+.logo-mark{width:32px;height:32px;border-radius:8px;vertical-align:-5px;margin-right:8px}
+.login-mark{width:120px;height:120px;border-radius:26px;margin-bottom:6px;mix-blend-mode:multiply}
 .school{color:rgba(255,255,255,.7);font-size:14px}
 .sp{flex:1}
 nav.tabs{display:flex;gap:2px;flex-wrap:wrap}
@@ -169,7 +186,7 @@ const FIREBASE_CONFIG = {
   storageBucket: "...", messagingSenderId: "...", appId: "..."
 };
 */
-const VERSION = '1.1.0';
+const VERSION = '1.1.1';
 const DOW = ['일','월','화','수','목','금','토'];
 const DEADLINE_HOUR = 15;     // 사용 전날(앞 수업일) 오후 3시 마감
 const KEEP_DAYS = 70;         // 이보다 오래된 기록은 정리
@@ -529,7 +546,7 @@ function render(){
   ${DEMO?`<div class="demo-bar"><div class="wrap">체험 모드예요. 기록은 이 기기에만 저장되고, 다른 선생님 화면에는 보이지 않아요.
     <span class="sp"></span><button class="small" data-act="demo-switch">다른 선생님으로 보기</button><button class="small" data-act="demo-reset">체험 기록 처음으로</button></div></div>`:''}
   <header class="top"><div class="wrap">
-    <span class="logo">찜<b>!</b></span><span class="school">${esc(S.school.name)} 체육 공간 예약판</span>
+    <span class="logo"><img src="icons/mark-96.png" alt="" class="logo-mark">찜<b>!</b></span><span class="school">${esc(S.school.name)} 체육 공간 예약판</span>
     <span class="sp"></span>
     <nav class="tabs">
       ${tabBtn('board','예약판')}${tabBtn('mine','내 예약')}${tabBtn('inbox','알림'+(unread?`<span class="badge">${unread}</span>`:''))}
@@ -759,7 +776,7 @@ function teacherBtn(t, act){
   return `<button data-act="${act}" data-id="${t.id}"><span class="mag ${t.kind==='pe'?'red':t.kind==='homeroom'?'blue':'gray'}">${esc(t.cls||t.name.slice(0,1))}</span>${esc(t.name)} <span class="muted">${kindLabel(t)}${t.cls?' · '+esc(t.cls):''}${t.admin?' · 관리자':''}</span></button>`;
 }
 function renderLogin(){
-  let h = `<div class="login"><div class="logo">찜<b>!</b></div><div class="tag">체육 공간 작전판 · 체육 수업이 먼저, 빈 시간은 신청으로</div><div class="card">`;
+  let h = `<div class="login"><div class="logo"><img src="icons/icon-192.png" alt="" class="login-mark"><br>찜<b>!</b></div><div class="tag">체육 공간 작전판 · 체육 수업이 먼저, 빈 시간은 신청으로</div><div class="card">`;
   const acct = AUTH ? `<p class="muted">${esc(AUTH.email||AUTH.displayName||'')} 계정 · <button class="ghost small" data-act="signout">다른 계정</button></p>` : '';
   if(DEMO){
     if(!S){ h+=`<p>불러오는 중...</p>`; }

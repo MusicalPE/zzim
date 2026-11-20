@@ -1,5 +1,7 @@
 # 찜! Zzim
 
+<img src="icons/logo.png" alt="찜! 체육 공간 작전판" width="480">
+
 학교 강당·운동장·체육 관련 교실을 함께 쓰는 체육 공간 예약판입니다. 체육 수업이 1순위이고, 체육 선생님이 비운 시간과 원래 빈 시간은 다른 반이 신청해서 씁니다.
 
 만든 사람: 음악적체육인
@@ -32,6 +34,7 @@
 
 - `index.html` 화면·규칙·저장이 모두 들어 있는 한 장짜리 앱. 맨 위 `FIREBASE_CONFIG` 에 파이어베이스(zzim-pe) 설정이 들어 있습니다. 주소 뒤에 `?demo` 를 붙이면 체험 모드로 열립니다.
 - `firebase-rules.txt` 파이어베이스 설정 순서와 Firestore 보안 규칙
+- `icons/`, `og.jpg`, `manifest.webmanifest` 아이콘·카톡 공유 그림·홈 화면 추가 설정
 - `tests/` 시험 파일
 
 ## 시험

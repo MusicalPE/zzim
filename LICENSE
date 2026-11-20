@@ -32,5 +32,6 @@ Copyright (c) 2026 음악적체육인. All rights reserved.
 6. 함께 쓴 외부 구성요소와 서비스 (각자의 사용 조건을 따릅니다)
    - Firebase JavaScript SDK (Google) — Apache License 2.0
    - Noto Sans KR, Black Han Sans 글꼴 — SIL Open Font License 1.1
+   - 아이콘·공유 그림의 바탕 그림은 Google Gemini로 만든 뒤 글자를 얹어 다듬었습니다.
 
 문의: GitHub 저장소(https://github.com/MusicalPE/zzim)의 Issues
