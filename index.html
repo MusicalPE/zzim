@@ -174,6 +174,9 @@ nav.tabs a.fb:hover{background:rgba(255,255,255,.08)}
 .beta-note{background:#fff6d9;border:2px solid #f2c230;border-radius:12px;padding:10px 14px;font-size:14px;margin-bottom:14px;text-align:center}
 .blockbox{margin-top:12px;border-top:2px dashed var(--line);padding-top:10px}
 .blockbox summary{cursor:pointer;font-weight:700;color:var(--sub)}
+.mergelist{display:flex;flex-wrap:wrap;gap:6px 14px;margin:8px 0}
+.mergelist label{font-size:14px;white-space:nowrap}
+.ttbtn{width:100%;border-radius:8px;border-width:1px;padding:4px;font-size:13px;background:transparent}
 .choice{display:flex;gap:8px;align-items:center;width:100%;text-align:left;margin-bottom:6px;border-radius:12px}
 </style>
 </head>
@@ -201,7 +204,7 @@ const FIREBASE_CONFIG = {
   storageBucket: "...", messagingSenderId: "...", appId: "..."
 };
 */
-const VERSION = '1.4.0';
+const VERSION = '1.5.0';
 const BETA = true;            // 시험판 표시 (앱 모음에 공개할 때 false 로)
 const FEEDBACK_URL = '';      // 의견 받기 설문 주소 (헤아림). 비어 있으면 '의견 보내기' 단추가 숨겨짐
 const DOW = ['일','월','화','수','목','금','토'];
@@ -279,6 +282,13 @@ function isPE(t){ return t && (t.kind==='pe'); }
 function canManage(t){ return t && (t.admin || t.kind==='pe'); }
 
 /* ---------- 칸 상태 계산 ---------- */
+/* 합반: 한 칸을 여러 반이 함께 씀 */
+function ttClasses(tt){ if(!tt) return []; if(Array.isArray(tt.classes)&&tt.classes.length) return tt.classes; return tt.cls ? String(tt.cls).split(/\s*[·,+]\s*/).filter(Boolean) : []; }
+const members = b => [b.who, ...((b && b.with) || [])];
+const glabel = b => members(b).join('+');
+function cleanWith(s, me, list){ const own=whoLabel(me); return [...new Set((list||[]).filter(c=>c && c!==own && s.school.classes.includes(c)))]; }
+function groupUsed(s, mem, month, lunch){ return Math.max(...mem.map(w=>usageInMonth(s,w,month,lunch))); }
+function homeroomsOf(s, cls){ return s.teachers.filter(t=>t.kind==='homeroom' && t.cls===cls); }
 /* 막은 칸: 하루만(blocks[skey]) 또는 매주 같은 요일(blocksWeekly[tkey]) */
 function blockOf(s, placeId, date, period){
   const one = (s.blocks||{})[skey(placeId,date,period)];
@@ -290,10 +300,11 @@ function blockOf(s, placeId, date, period){
 /* 점심시간 신청 학년 (요일별). 비어 있으면 모든 학년 */
 function lunchGradesOf(s, dow){ const g=((s.school.lunch||{}).grades||{})[dow]; return Array.isArray(g)&&g.length ? g : null; }
 function gradeOf(t){ const m=(t&&t.cls||'').match(/^(\d+)-/); return m?Number(m[1]):null; }
-function lunchAllowed(s, me, date){
+function lunchAllowed(s, me, date, withList){
   if(!(me.kind==='homeroom' && me.cls)) return {ok:false, why:'점심시간은 담임 선생님이 반 이름으로 신청해요.'};
   const g = lunchGradesOf(s, parseYmd(date).getDay());
   if(g && !g.includes(gradeOf(me))) return {ok:false, why:`이 요일 점심시간은 ${g.join('·')}학년만 신청할 수 있어요.`};
+  if(g) for(const c of (withList||[])){ const m=c.match(/^(\d+)-/); if(m && !g.includes(Number(m[1]))) return {ok:false, why:`이 요일 점심시간은 ${g.join('·')}학년만 신청할 수 있어서 ${c}과(와) 함께 신청할 수 없어요.`}; }
   return {ok:true};
 }
 function slotInfo(s, placeId, date, period, t){
@@ -323,7 +334,7 @@ function usageInMonth(s, who, monthPrefix, lunch){
   let n=0;
   for(const k in s.bookings){
     const b=s.bookings[k], sk=splitKey(k);
-    if((b.how==='bid'||b.how==='direct') && b.who===who && sk.date.startsWith(monthPrefix) && (sk.period===0)===!!lunch) n++;
+    if((b.how==='bid'||b.how==='direct') && members(b).includes(who) && sk.date.startsWith(monthPrefix) && (sk.period===0)===!!lunch) n++;
   }
   return n;
 }
@@ -348,23 +359,24 @@ function resolveDue(s, t){
     delete s.bids[k]; changed = true;
     if(!list.length || s.bookings[k]) continue;
     const month = date.slice(0,7);
-    const scored = list.map(b=>({...b, used: usageInMonth(s,b.who,month,period===0)}));
+    const scored = list.map(b=>({...b, used: groupUsed(s,members(b),month,period===0)}));
     const min = Math.min(...scored.map(x=>x.used));
     const ties = scored.filter(x=>x.used===min);
     let win, how;
     if(ties.length===1){ win=ties[0]; how='이번 달 사용 횟수가 가장 적어서'; }
     else{
-      const seed = hashStr(k+'#'+ties.map(x=>x.who).sort().join(','));
-      win = ties.slice().sort((a,b)=>a.who<b.who?-1:1)[seed % ties.length];
+      const seed = hashStr(k+'#'+ties.map(x=>glabel(x)).sort().join(','));
+      win = ties.slice().sort((a,b)=>glabel(a)<glabel(b)?-1:1)[seed % ties.length];
       how = '사용 횟수가 같아 추첨으로';
     }
-    s.bookings[k] = {teacherId:win.teacherId, who:win.who, how:'bid', at:t.toISOString()};
+    s.bookings[k] = {teacherId:win.teacherId, who:win.who, with:win.with||[], how:'bid', at:t.toISOString()};
     const where = placeOf(s,placeId).name+' '+dateLabel(date)+' '+plabel(period);
-    pushMsg(s, win.teacherId, `[확정] ${where} — ${how} ${win.who} 사용으로 정해졌어요.${period===0?' 점심시간 강당 정리와 안전 지도는 신청한 담임 선생님이 맡아요.':''}`, t);
+    pushMsg(s, win.teacherId, `[확정] ${where} — ${how} ${glabel(win)} 사용으로 정해졌어요.${period===0?' 점심시간 강당 정리와 안전 지도는 신청한 담임 선생님이 맡아요.':''}`, t);
     for(const x of scored){
       if(x.teacherId===win.teacherId) continue;
-      pushMsg(s, x.teacherId, `[아쉬워요] ${where} — ${how} ${win.who}에게 돌아갔어요. (이번 달 사용: ${x.who} ${x.used}회, ${win.who} ${win.used}회)`, t);
+      pushMsg(s, x.teacherId, `[아쉬워요] ${where} — ${how} ${glabel(win)}에게 돌아갔어요. (이번 달 사용: ${glabel(x)} ${x.used}회, ${glabel(win)} ${win.used}회)`, t);
     }
+    for(const c of (win.with||[])) for(const tt of homeroomsOf(s,c)) pushMsg(s, tt.id, `[합반 확정] ${where} — ${tName(s,win.teacherId)} 선생님이 신청한 ${glabel(win)} 합반으로 쓰게 됐어요.`, t);
   }
   return changed;
 }
@@ -393,13 +405,15 @@ const A = {
     for(const b of i.bids) pushMsg(s, b.teacherId, `[취소] ${placeOf(s,placeId).name} ${dateLabel(date)} ${plabel(period)} — 체육 수업으로 다시 쓰게 되어 신청이 취소되었어요.`);
     delete s.bids[k]; delete s.releases[k];
   },
-  bid(s, me, k){
+  bid(s, me, k, withList){
     const {placeId,date,period}=splitKey(k); const i=slotInfo(s,placeId,date,period);
-    if(period===0){ const la=lunchAllowed(s,me,date); if(!la.ok) return {error:la.why}; }
+    const w = cleanWith(s, me, withList);
+    if(period===0){ const la=lunchAllowed(s,me,date,w); if(!la.ok) return {error:la.why}; }
     if(i.st!=='bidding') return {error:'지금은 신청할 수 없는 칸이에요.'};
     const who = whoLabel(me);
-    if(i.bids.some(b=>b.teacherId===me.id || b.who===who)) return {error:'이미 신청했어요.'};
-    s.bids[k] = [...i.bids, {teacherId:me.id, who, at:now().toISOString()}];
+    if(i.bids.some(b=>b.teacherId===me.id)) return {error:'이미 신청했어요.'};
+    for(const c of [who, ...w]){ const o=i.bids.find(b=>members(b).includes(c)); if(o) return {error:`${c}은(는) 이미 ${glabel(o)} 신청에 들어 있어요.`}; }
+    s.bids[k] = [...i.bids, {teacherId:me.id, who, with:w, at:now().toISOString()}];
   },
   unbid(s, me, k){
     const list = s.bids[k]||[];
@@ -407,17 +421,20 @@ const A = {
     if(next.length===list.length) return {error:'신청한 기록이 없어요.'};
     if(next.length) s.bids[k]=next; else delete s.bids[k];
   },
-  direct(s, me, k){
+  direct(s, me, k, withList){
     const {placeId,date,period}=splitKey(k); const i=slotInfo(s,placeId,date,period);
-    if(period===0){ const la=lunchAllowed(s,me,date); if(!la.ok) return {error:la.why}; }
+    const w = cleanWith(s, me, withList);
+    if(period===0){ const la=lunchAllowed(s,me,date,w); if(!la.ok) return {error:la.why}; }
     if(i.st!=='direct') return {error: i.st==='booked'?'방금 다른 반이 먼저 예약했어요.':'지금은 바로 예약할 수 없는 칸이에요.'};
-    s.bookings[k] = {teacherId:me.id, who:whoLabel(me), how:'direct', at:now().toISOString()};
+    s.bookings[k] = {teacherId:me.id, who:whoLabel(me), with:w, how:'direct', at:now().toISOString()};
+    for(const c of w) for(const t of homeroomsOf(s,c)) pushMsg(s, t.id, `[합반] ${placeOf(s,placeId).name} ${dateLabel(date)} ${plabel(period)} — ${me.name} 선생님이 ${glabel(s.bookings[k])} 합반으로 예약했어요.`);
   },
   cancel(s, me, k){
     const b = s.bookings[k];
     if(!b) return {error:'예약이 없어요.'};
     if(b.teacherId!==me.id && !canManage(me)) return {error:'내 예약만 취소할 수 있어요.'};
     if(b.how==='rain' && b.from){ delete s.rain[skey(b.from, splitKey(k).date, splitKey(k).period)]; }
+    { const x=splitKey(k); for(const c of (b.how==='rain'?[]:(b.with||[]))) for(const t of homeroomsOf(s,c)) if(t.id!==me.id) pushMsg(s, t.id, `[취소] ${placeOf(s,x.placeId).name} ${dateLabel(x.date)} ${plabel(x.period)} ${glabel(b)} 합반 예약이 취소되었어요.`); }
     if(b.teacherId!==me.id){
       const {placeId,date,period}=splitKey(k);
       pushMsg(s, b.teacherId, `[취소] ${placeOf(s,placeId).name} ${dateLabel(date)} ${plabel(period)} 예약을 ${me.name} 선생님이 취소했어요.`);
@@ -434,11 +451,11 @@ const A = {
     if(toPlace.outdoor) return {error:'실내 장소를 골라 주세요.'};
     const toK = skey(toPlaceId,f.date,f.period);
     const ti = slotInfo(s,toPlaceId,f.date,f.period);
-    if(ti.st==='pe') return {error:`그 시간 ${toPlace.name}에는 다른 체육 수업(${ti.tt.cls})이 있어요.`};
+    if(ti.st==='pe') return {error:`그 시간 ${toPlace.name}에는 다른 체육 수업(${ttClasses(ti.tt).join('·')})이 있어요.`};
     if(ti.st==='rain') return {error:`그 시간 ${toPlace.name}은 이미 다른 우천 수업이 쓰고 있어요.`};
     if(ti.st==='blocked') return {error:`그 시간 ${toPlace.name}은 막아 둔 칸이에요 (${ti.block.reason}).`};
     const when = `${dateLabel(f.date)} ${f.period}교시`;
-    const cls = fi.tt.cls;
+    const cls = ttClasses(fi.tt).join('·'); const tcls = ttClasses(fi.tt);
     if(ti.booking){
       pushMsg(s, ti.booking.teacherId, `[우천 안내] 비가 와서 ${when} ${toPlace.name}을(를) ${cls} 체육 수업이 쓰게 되었어요. 선생님 반(${ti.booking.who})의 예약은 취소되었습니다. 양해 부탁드려요.`);
     }
@@ -446,10 +463,10 @@ const A = {
       pushMsg(s, b.teacherId, `[우천 안내] 비가 와서 ${when} ${toPlace.name}을(를) ${cls} 체육 수업이 쓰게 되었어요. 신청은 취소되었습니다.`);
     }
     delete s.bids[toK];
-    s.bookings[toK] = {teacherId: fi.tt.teacherId || me.id, who:cls, how:'rain', from:f.placeId, at:now().toISOString()};
+    s.bookings[toK] = {teacherId: fi.tt.teacherId || me.id, who:tcls[0], with:tcls.slice(1), how:'rain', from:f.placeId, at:now().toISOString()};
     s.rain[fromK] = {to:toPlaceId, cls, by:me.id};
     for(const t of s.teachers){
-      if(t.cls===cls && t.kind==='homeroom')
+      if(tcls.includes(t.cls) && t.kind==='homeroom')
         pushMsg(s, t.id, `[우천 안내] ${when} ${cls} 체육은 비 때문에 ${placeOf(s,f.placeId).name} 대신 ${toPlace.name}에서 해요.`);
     }
   },
@@ -694,18 +711,18 @@ function renderCell(i){
   let mag='', note='', extra='';
   const rel = i.released ? '<small>체육 비움</small>' : '';
   switch(i.st){
-    case 'pe': mag=`<span class="mag red">${esc(i.tt.cls)}</span>`; note=`체육 수업<small>1순위</small>`; break;
-    case 'rain': mag=`<span class="mag red rainmag">${esc(i.booking.who)}</span>`; note=`우천 이동<small>${esc(placeOf(S,i.booking.from).name)}에서 옴</small>`; break;
+    case 'pe': { const cs=ttClasses(i.tt); mag=`<span class="mag red">${esc(cs[0]||'')}</span>`; note=`체육 수업<small>${cs.length>1?'+'+esc(cs.slice(1).join('·'))+' 합반':'1순위'}</small>`; break; }
+    case 'rain': mag=`<span class="mag red rainmag">${esc(i.booking.who)}</span>`; note=`우천 이동${(i.booking.with||[]).length?'<small>+'+esc(i.booking.with.join('·'))+' 합반</small>':''}<small>${esc(placeOf(S,i.booking.from).name)}에서 옴</small>`; break;
     case 'rainout': mag=`<span class="mag ghost">${esc(i.rainOut.cls)}</span>`; note=`우천 → ${esc(placeOf(S,i.rainOut.to).name)}<small>체육 ${esc(i.rainOut.cls)}</small>`; break;
     case 'booked': {
-      const mine = i.booking.who===myWho;
+      const mine = members(i.booking).includes(myWho);
       mag=`<span class="mag ${mine?'yellow':'blue'}">${esc(i.booking.who)}</span>`;
-      note=`${i.booking.how==='bid'?'신청 확정':'예약'}${rel}`; break; }
+      note=`${i.booking.how==='bid'?'신청 확정':'예약'}${(i.booking.with||[]).length?'<small>+'+esc(i.booking.with.join('·'))+' 합반</small>':''}${rel}`; break; }
     case 'bidding': {
       const mine=i.bids.some(b=>b.teacherId===ME.id);
       if(!i.bids.length){ mag=`<span class="mag slot"></span>`; note=`빈 칸<small>마감 ${dlShort(i.dl)}</small>${rel}`; break; }
       const shown=i.bids.slice(0,3);
-      mag=`<span class="stack">${shown.map(b=>`<span class="mag mini ${b.teacherId===ME.id?'yellow':'orange'}">${esc(b.who)}</span>`).join('')}${i.bids.length>3?`<span class="mag mini gray">+${i.bids.length-3}</span>`:''}</span>`;
+      mag=`<span class="stack">${shown.map(b=>`<span class="mag mini ${b.teacherId===ME.id?'yellow':'orange'}" title="${esc(glabel(b))}">${esc(b.who)}</span>`).join('')}${i.bids.length>3?`<span class="mag mini gray">+${i.bids.length-3}</span>`:''}</span>`;
       note=`신청 ${i.bids.length}반<small>${mine?'신청함 · ':''}마감 ${dlShort(i.dl)}</small>${rel}`;
       if(mine) extra=' mypick'; break; }
     case 'resolving': mag=`<span class="mag ghost">?</span>`; note='결과 정리 중'; break;
@@ -724,6 +741,10 @@ function renderModal(){
   if(md.type==='slot') body = slotModal(md.k);
   else if(md.type==='rainpick') body = rainModal(md.k);
   else if(md.type==='switch') body = switchModal();
+  else if(md.type==='ttpick'){ const cur=S.peTimetable[md.tk]; const cs=cur?ttClasses(cur):[]; const [pid,dw,pr]=md.tk.split('|');
+    body = `<h2>${esc(placeOf(S,pid).name)} · ${DOW[dw]}요일 ${pr}교시 체육</h2><p class="muted">수업에 들어오는 반을 모두 고르세요. 두 반 이상이면 합반이에요.</p>
+      <div class="mergelist">${S.school.classes.map(c=>`<label><input type="checkbox" data-ttc="${esc(c)}" ${cs.includes(c)?'checked':''}> ${esc(c)}</label>`).join('')}</div>
+      <div class="acts"><button class="pri" data-act="tt-save" data-tk="${esc(md.tk)}">저장</button><button class="warn" data-act="tt-clear" data-tk="${esc(md.tk)}">비우기</button><button data-act="close">닫기</button></div>`; }
   else if(md.type==='invite') body = `<h2>${md.fresh?'학교를 만들었어요':'선생님 초대'}</h2>${inviteBlock(260)}<div class="acts"><button data-act="close">닫기</button></div>`;
   m.innerHTML = `<div class="modal-bg" data-act="close-bg"><div class="modal">${body}</div></div>`;
 }
@@ -742,7 +763,7 @@ function slotModal(k){
   if(lunch) h += `<p class="lunch-note">${'점심시간 강당 정리와 안전 지도는 신청한 담임 선생님이 맡아요.'}</p>`;
   switch(i.st){
     case 'pe':
-      h += `<span class="status"><i class="mag red"></i>체육 수업 · 1순위</span><p>${esc(i.tt.cls)} 체육 (${esc(tName(S,i.tt.teacherId))} 선생님)</p>`;
+      h += `<span class="status"><i class="mag red"></i>체육 수업 · 1순위</span><p>${esc(ttClasses(i.tt).join('·'))}${ttClasses(i.tt).length>1?' 합반':''} 체육 (${esc(tName(S,i.tt.teacherId))} 선생님)</p>`;
       if(peOwner && !i.past){
         acts.push(`<button class="pri" data-act="release" data-k="${esc(k)}">이 시간 비우기 (교실 수업)</button>`);
         if(pl.outdoor) acts.push(`<button data-act="rainpick" data-k="${esc(k)}">비 와요 · 실내로 옮기기</button>`);
@@ -758,7 +779,7 @@ function slotModal(k){
       if(canManage(ME)) acts.push(`<button class="warn" data-act="rainundo" data-k="${esc(skey(i.booking.from,date,period))}">우천 이동 되돌리기</button>`);
       break;
     case 'booked':
-      h += `<span class="status"><i class="mag ${i.booking.who===myWho?'yellow':'blue'}"></i>확정</span><p><b>${esc(i.booking.who)}</b> 사용 (${esc(tName(S,i.booking.teacherId))} 선생님 · ${i.booking.how==='bid'?'신청으로 확정':'바로 예약'})</p>`;
+      h += `<span class="status"><i class="mag ${members(i.booking).includes(myWho)?'yellow':'blue'}"></i>확정</span><p><b>${esc(glabel(i.booking))}</b>${(i.booking.with||[]).length?' 합반':''} 사용 (${esc(tName(S,i.booking.teacherId))} 선생님 · ${i.booking.how==='bid'?'신청으로 확정':'바로 예약'})</p>`;
       if(i.released) h+=`<p class="muted">원래 ${esc(i.tt.cls)} 체육 시간인데 체육 선생님이 비운 칸이에요.</p>`;
       if(!i.past && (i.booking.teacherId===ME.id || canManage(ME))) acts.push(`<button class="warn" data-act="cancel" data-k="${esc(k)}">예약 취소</button>`);
       break;
@@ -766,10 +787,10 @@ function slotModal(k){
       h += `<span class="status"><i class="mag orange"></i>신청 받는 중</span><p>마감: <b>${dateLabel(ymd(i.dl))} 오후 3시</b><br><span class="muted">마감 뒤 이번 달에 덜 쓴 반이 먼저, 같으면 추첨으로 정해요.</span></p>`;
       if(i.released) h+=`<p class="muted">원래 ${esc(i.tt.cls)} 체육 시간인데 체육 선생님이 비운 칸이에요.</p>`;
       h += `<h3>신청한 반 (${i.bids.length})</h3>`;
-      h += i.bids.length ? `<ul class="list">${i.bids.map(b=>`<li><b>${esc(b.who)}</b><span class="muted">${esc(tName(S,b.teacherId))} · 이번 달 ${lunch?'점심시간 ':''}${usageInMonth(S,b.who,month,lunch)}회 사용</span></li>`).join('')}</ul>` : `<p class="muted">아직 신청한 반이 없어요.</p>`;
+      h += i.bids.length ? `<ul class="list">${i.bids.map(b=>`<li><b>${esc(glabel(b))}</b>${(b.with||[]).length?' <span class="muted">합반</span>':''}<span class="muted">${esc(tName(S,b.teacherId))} · 이번 달 ${lunch?'점심시간 ':''}${groupUsed(S,members(b),month,lunch)}회 사용${(b.with||[]).length?' (합반 중 가장 많이 쓴 반 기준)':''}</span></li>`).join('')}</ul>` : `<p class="muted">아직 신청한 반이 없어요.</p>`;
       const mine = i.bids.some(b=>b.teacherId===ME.id);
       if(mine) acts.push(`<button class="warn" data-act="unbid" data-k="${esc(k)}">신청 취소</button>`);
-      else if(lunch ? canLunch : (!isPE(ME) || ME.cls)) acts.push(`<button class="pri" data-act="bid" data-k="${esc(k)}">${esc(myWho)} 신청하기${lunch?' (정리·안전 지도 함께)':''}</button>`);
+      else if(lunch ? canLunch : (!isPE(ME) || ME.cls)){ h += mergePicker(); acts.push(`<button class="pri" data-act="bid" data-k="${esc(k)}">${esc(myWho)} 신청하기${lunch?' (정리·안전 지도 함께)':''}</button>`); }
       else if(lunch) h += `<p class="muted">${esc(lunchAllowed(S,ME,date).why)}</p>`;
       if(!lunch || canLunch) h += `<p class="muted">우리(${esc(myWho)}) 이번 달 ${lunch?'점심시간 ':''}사용: ${usageInMonth(S,myWho,month,lunch)}회</p>`;
       if(i.released && peOwner) acts.push(`<button data-act="unrelease" data-k="${esc(k)}">다시 체육 수업으로</button>`);
@@ -779,7 +800,7 @@ function slotModal(k){
     case 'direct':
       h += `<span class="status"><i class="mag slot" style="border-color:#999"></i>남은 칸</span><p>신청이 마감되었고 아무도 쓰지 않는 칸이에요. 먼저 누르는 반이 써요.</p>`;
       if(i.released) h+=`<p class="muted">원래 ${esc(i.tt.cls)} 체육 시간인데 체육 선생님이 비운 칸이에요.</p>`;
-      if(lunch ? canLunch : (!isPE(ME) || ME.cls)) acts.push(`<button class="pri" data-act="direct" data-k="${esc(k)}">${esc(myWho)} 바로 예약${lunch?' (정리·안전 지도 함께)':''}</button>`);
+      if(lunch ? canLunch : (!isPE(ME) || ME.cls)){ h += mergePicker(); acts.push(`<button class="pri" data-act="direct" data-k="${esc(k)}">${esc(myWho)} 바로 예약${lunch?' (정리·안전 지도 함께)':''}</button>`); }
       else if(lunch) h += `<p class="muted">${esc(lunchAllowed(S,ME,date).why)}</p>`;
       if(i.released && peOwner) acts.push(`<button data-act="unrelease" data-k="${esc(k)}">다시 체육 수업으로</button>`);
       break;
@@ -790,9 +811,9 @@ function slotModal(k){
       break;
   }
   if(canManage(ME) && !i.past && ['bidding','direct','booked'].includes(i.st)){
-    h += `<details class="blockbox"><summary>이 칸 막기 (스포츠클럽·행사 등)</summary>
+    h += `<details class="blockbox"><summary>이 칸 막기 (스포츠클럽·방과후·행사 등)</summary>
       <div class="row" style="margin-top:8px"><input id="bl-reason" list="bl-reasons" placeholder="사유" value="${lunch?'스포츠클럽 활동':''}" style="flex:1;min-width:160px">
-      <datalist id="bl-reasons"><option>스포츠클럽 활동</option><option>학교 행사</option><option>시설 점검·공사</option><option>시험·평가</option></datalist>
+      <datalist id="bl-reasons"><option>스포츠클럽 활동</option><option>학교 행사</option><option>방과후 수업</option><option>시설 점검·공사</option><option>시험·평가</option></datalist>
       <label class="small"><input type="checkbox" id="bl-weekly" ${lunch?'checked':''}> 매주 ${DOW[parseYmd(date).getDay()]}요일 반복</label>
       <button class="warn" data-act="block" data-k="${esc(k)}">막기</button></div>
       <p class="muted">이미 있는 신청·예약은 취소되고 그 선생님께 알림이 가요.</p></details>`;
@@ -800,16 +821,24 @@ function slotModal(k){
   acts.push(`<button data-act="close">닫기</button>`);
   return h + `<div class="acts">${acts.join('')}</div>`;
 }
+function mergePicker(){
+  const own=whoLabel(ME), cs=S.school.classes.filter(c=>c!==own);
+  if(!cs.length) return '';
+  return `<details class="blockbox merge"><summary>다른 반과 함께 쓰기 (합반)</summary>
+    <div class="mergelist">${cs.map(c=>`<label><input type="checkbox" data-with="${esc(c)}"> ${esc(c)}</label>`).join('')}</div>
+    <p class="muted">체크한 반 담임 선생님께도 알림이 가요. 합반으로 쓴 횟수는 함께한 반 모두에게 1회씩 세요.</p></details>`;
+}
+function pickedWith(){ return [...document.querySelectorAll('[data-with]:checked')].map(x=>x.dataset.with); }
 function rainModal(k){
   const {placeId,date,period}=splitKey(k);
   const i = slotInfo(S,placeId,date,period);
   const indoor = S.places.filter(p=>!p.outdoor);
-  let h = `<h2>비 와요 · 실내로 옮기기</h2><p class="muted">${dateLabel(date)} ${period}교시 ${esc(i.tt?i.tt.cls:'')} 체육. 옮길 곳을 고르세요. 그 칸을 예약한 반이 있으면 체육 수업이 먼저 쓰고, 그 담임 선생님께 안내 메시지가 가요.</p>`;
+  let h = `<h2>비 와요 · 실내로 옮기기</h2><p class="muted">${dateLabel(date)} ${period}교시 ${esc(i.tt?ttClasses(i.tt).join('·'):'')} 체육. 옮길 곳을 고르세요. 그 칸을 예약한 반이 있으면 체육 수업이 먼저 쓰고, 그 담임 선생님께 안내 메시지가 가요.</p>`;
   if(!indoor.length) h += `<p>실내 장소가 없어요. 설정에서 추가해 주세요.</p>`;
   for(const p of indoor){
     const ti = slotInfo(S,p.id,date,period);
     let note='비어 있음', dis=false;
-    if(ti.st==='pe'){ note='다른 체육 수업('+ti.tt.cls+')'; dis=true; }
+    if(ti.st==='pe'){ note='다른 체육 수업('+ttClasses(ti.tt).join('·')+')'; dis=true; }
     else if(ti.st==='rain'){ note='다른 우천 수업 사용 중'; dis=true; }
     else if(ti.st==='booked') note = ti.booking.who+' 예약 있음 → 취소 안내가 가요';
     else if(ti.bids.length) note = '신청 '+ti.bids.length+'반 → 신청 취소 안내가 가요';
@@ -827,11 +856,11 @@ function renderMine(){
   const today = ymd(now());
   const myWho = whoLabel(ME);
   const sortK = (a,b)=>{ const A=splitKey(a),B=splitKey(b); return A.date<B.date?-1:A.date>B.date?1:A.period-B.period; };
-  const books = Object.keys(S.bookings).filter(k=>S.bookings[k].who===myWho && splitKey(k).date>=today).sort(sortK);
+  const books = Object.keys(S.bookings).filter(k=>members(S.bookings[k]).includes(myWho) && splitKey(k).date>=today).sort(sortK);
   const bids = Object.keys(S.bids).filter(k=>S.bids[k].some(b=>b.teacherId===ME.id)).sort(sortK);
   const line = k => { const {placeId,date,period}=splitKey(k); return `<b>${dateLabel(date)} ${plabel(period)}</b> ${esc(placeOf(S,placeId).name)}`; };
   let h = `<div class="card"><h2>확정된 사용 (${books.length})</h2>`;
-  h += books.length? `<ul class="list">${books.map(k=>`<li>${line(k)} <span class="muted">${S.bookings[k].how==='rain'?'우천 이동':S.bookings[k].how==='bid'?'신청 확정':'바로 예약'}</span><span class="sp"></span><button class="small" data-act="slot" data-k="${esc(k)}">보기</button></li>`).join('')}</ul>` : `<p class="muted">아직 없어요.</p>`;
+  h += books.length? `<ul class="list">${books.map(k=>`<li>${line(k)} <span class="muted">${S.bookings[k].how==='rain'?'우천 이동':S.bookings[k].how==='bid'?'신청 확정':'바로 예약'}${(S.bookings[k].with||[]).length?' · '+esc(glabel(S.bookings[k]))+' 합반':''}</span><span class="sp"></span><button class="small" data-act="slot" data-k="${esc(k)}">보기</button></li>`).join('')}</ul>` : `<p class="muted">아직 없어요.</p>`;
   h += `</div><div class="card"><h2>신청 중 (${bids.length})</h2>`;
   h += bids.length? `<ul class="list">${bids.map(k=>`<li>${line(k)} <span class="muted">${S.bids[k].length}반 신청 · 마감 ${dateLabel(ymd(deadlineOf(splitKey(k).date)))} 오후 3시</span><span class="sp"></span><button class="small" data-act="slot" data-k="${esc(k)}">보기</button></li>`).join('')}</ul>` : `<p class="muted">아직 없어요.</p>`;
   h += `</div><div class="card"><h2>이번 달 사용 횟수</h2><p>${esc(myWho)} 수업 시간: <b>${usageInMonth(S,myWho,today.slice(0,7),false)}회</b> · 점심시간: <b>${usageInMonth(S,myWho,today.slice(0,7),true)}회</b></p><p class="muted">신청·바로 예약으로 쓴 횟수예요. 여러 반이 신청하면 이 숫자가 적은 반이 먼저이고, 수업 시간과 점심시간은 따로 셈해요.</p></div>`;
@@ -884,12 +913,12 @@ function renderSettings(){
   h += `<div class="card"><h2>장소</h2><p class="muted">학교 사정에 맞게 체육 관련 장소를 더하거나 빼세요. '실외'로 표시한 곳의 수업만 비 오는 날 실내로 옮길 수 있어요.</p><ul class="list">
     ${s.places.map(p=>`<li><input data-pname="${p.id}" value="${esc(p.name)}" style="width:160px"><label class="small"><input type="checkbox" data-pout="${p.id}" ${p.outdoor?'checked':''}> 실외</label><label class="small"><input type="checkbox" data-plunch="${p.id}" ${placeHasLunch(p)?'checked':''}> 점심시간 신청</label><span class="sp"></span><button class="small warn" data-act="place-del" data-id="${p.id}">빼기</button></li>`).join('')}
     </ul><div class="row"><input id="new-place" placeholder="예: 다목적실, 무용실, 탁구장"><label class="small"><input type="checkbox" id="new-place-out"> 실외</label><button data-act="place-add">더하기</button><span class="sp"></span><button class="pri" data-act="save-places">이름·실외 저장</button></div></div>`;
-  h += `<div class="card"><h2>체육 수업 시간표 (1순위)</h2><p class="muted">한 번 넣어 두면 매주 자동으로 체육 칸이 잡혀요. 칸마다 반을 고르면 바로 저장돼요.</p>
+  h += `<div class="card"><h2>체육 수업 시간표 (1순위)</h2><p class="muted">한 번 넣어 두면 매주 자동으로 체육 칸이 잡혀요. 칸을 눌러 반을 고르세요. 두 반 이상 고르면 합반 수업이 돼요.</p>
     <div class="places">${s.places.map(p=>`<button class="${p.id===ui.ttPlace?'on':''}" data-act="ttplace" data-id="${p.id}">${esc(p.name)}</button>`).join('')}</div>
     ${pes.length>1?`<div class="row" style="margin-bottom:8px"><label class="muted">새로 넣는 칸의 담당</label><select id="tt-teacher">${pes.map(t=>`<option value="${t.id}" ${t.id===ui.ttTeacher?'selected':''}>${esc(t.name)}</option>`).join('')}</select></div>`:''}
     ${s.school.classes.length?'':`<p class="err">먼저 위 '학교 정보'에서 학급 목록을 넣어 주세요.</p>`}
     <div style="overflow-x:auto"><table class="tt"><tr><th>교시</th>${[1,2,3,4,5].map(d=>`<th>${DOW[d]}</th>`).join('')}</tr>
-    ${s.school.periods.map(p=>`<tr><th>${p.no}</th>${[1,2,3,4,5].map(d=>{ const cur=s.peTimetable[tkey(ui.ttPlace,d,p.no)]; return `<td class="${cur?'has':''}"><select data-tt="${tkey(ui.ttPlace,d,p.no)}"><option value="">-</option>${s.school.classes.map(c=>`<option ${cur&&cur.cls===c?'selected':''}>${esc(c)}</option>`).join('')}</select>${cur&&pes.length>1?`<div class="small muted">${esc(tName(s,cur.teacherId))}</div>`:''}</td>`; }).join('')}</tr>`).join('')}
+    ${s.school.periods.map(p=>`<tr><th>${p.no}</th>${[1,2,3,4,5].map(d=>{ const cur=s.peTimetable[tkey(ui.ttPlace,d,p.no)]; return `<td class="${cur?'has':''}"><button class="ttbtn" data-act="ttpick" data-tk="${tkey(ui.ttPlace,d,p.no)}">${cur?esc(ttClasses(cur).join('·')):'-'}</button>${cur&&pes.length>1?`<div class="small muted">${esc(tName(s,cur.teacherId))}</div>`:''}</td>`; }).join('')}</tr>`).join('')}
     </table></div></div>`;
   h += `<div class="card"><h2>선생님</h2><ul class="list">
     ${s.teachers.map(t=>`<li><b>${esc(t.name)}</b><span class="muted">${kindLabel(t)}${t.cls?' · '+esc(t.cls):''}${t.admin?' · 관리자':''}${t.email?' · '+esc(t.email):''}</span><span class="sp"></span>
@@ -977,9 +1006,9 @@ document.addEventListener('click', async e=>{
     case 'invite-big': ui.modal={type:'invite'}; renderModal(); break;
     case 'release': if(await act((s,me)=>A.release(s,me,k))) toast('비웠어요. 다른 선생님들이 신청할 수 있어요.'); break;
     case 'unrelease': if(await act((s,me)=>A.unrelease(s,me,k))) toast('다시 체육 수업 칸으로 돌렸어요.'); break;
-    case 'bid': if(await act((s,me)=>A.bid(s,me,k))) toast('신청했어요. 마감 뒤 결과가 알림으로 와요.'); break;
+    case 'bid': { const w=pickedWith(); if(await act((s,me)=>A.bid(s,me,k,w))) toast(w.length?'합반으로 신청했어요. 마감 뒤 결과가 알림으로 와요.':'신청했어요. 마감 뒤 결과가 알림으로 와요.'); break; }
     case 'unbid': if(await act((s,me)=>A.unbid(s,me,k))) toast('신청을 취소했어요.'); break;
-    case 'direct': if(await act((s,me)=>A.direct(s,me,k))) toast('예약했어요.'); break;
+    case 'direct': { const w=pickedWith(); if(await act((s,me)=>A.direct(s,me,k,w))) toast(w.length?'합반으로 예약했어요.':'예약했어요.'); break; }
     case 'cancel': if(await act((s,me)=>A.cancel(s,me,k))) { toast('예약을 취소했어요.'); } break;
     case 'rainpick': ui.modal={type:'rainpick',k}; renderModal(); break;
     case 'block': { const reason=document.getElementById('bl-reason').value, weekly=document.getElementById('bl-weekly').checked;
@@ -1023,6 +1052,12 @@ document.addEventListener('click', async e=>{
       if(await act(s=>{ s.places.forEach(p=>{ if(names[p.id]) p.name=names[p.id]; if(p.id in outs) p.outdoor=outs[p.id]; if(p.id in lun) p.lunch=lun[p.id]; }); })) toast('저장했어요.');
       break; }
     case 'ttplace': ui.ttPlace=id; render(); break;
+    case 'ttpick': ui.modal={type:'ttpick', tk:b.dataset.tk}; renderModal(); break;
+    case 'tt-save': case 'tt-clear': {
+      const tk=b.dataset.tk, cs = a==='tt-clear' ? [] : [...document.querySelectorAll('[data-ttc]:checked')].map(x=>x.dataset.ttc);
+      const tSel=document.getElementById('tt-teacher'); if(tSel) ui.ttTeacher=tSel.value;
+      if(await act((s,me)=>{ if(!canManage(me)) return {error:'권한이 없어요.'}; if(cs.length) s.peTimetable[tk]={cls:cs.join('·'), classes:cs, teacherId:(s.peTimetable[tk]&&s.peTimetable[tk].teacherId)||ui.ttTeacher||me.id}; else delete s.peTimetable[tk]; })){ ui.modal=null; render(); }
+      break; }
     case 'save-lunch-grades': {
       const g={}; for(let d=1;d<=5;d++){ const on=[]; for(let gr=1;gr<=6;gr++){ const x=document.querySelector(`[data-lg="${d}-${gr}"]`); if(x&&x.checked) on.push(gr); } g[d]= on.length===6 ? [] : on; }
       if(await act(s=>{ s.school.lunch={...(s.school.lunch||{}), grades:g}; })) toast('저장했어요.');

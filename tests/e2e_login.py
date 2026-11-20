@@ -45,7 +45,7 @@ async def main():
         # 체육 시간표 하나 넣기 (학급 목록 필요)
         await pg.click('[data-act=view][data-v=settings]')
         await pg.fill('#set-classes','4-1, 4-2'); await pg.click('[data-act=save-school]'); await pg.wait_for_timeout(200)
-        await pg.select_option('[data-tt="p_hall|1|1"]','4-1'); await pg.wait_for_timeout(200)
+        await pg.click('[data-act=ttpick][data-tk="p_hall|1|1"]'); await pg.check('[data-ttc="4-1"]'); await pg.click('[data-act=tt-save]'); await pg.wait_for_timeout(200)
         # 나가기 → 담임 B 로그인
         await pg.click('[data-act=signout]'); await pg.wait_for_timeout(300)
         ok('구글 계정으로 로그인' in await pg.inner_text('#app'),'나가기 하면 구글 로그아웃')
