@@ -165,6 +165,9 @@ footer{text-align:center;color:var(--sub);font-size:12px;padding:24px 0}
 .qr{image-rendering:pixelated}
 .invite-txt{flex:1;min-width:220px}.invite-txt p{margin:0 0 8px}
 .url{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;word-break:break-all;background:#f3f1ea;padding:6px 8px;border-radius:8px}
+.lunchrow td{background:rgba(242,194,48,.07)}
+table.grid tr.lunchrow td.per b{color:var(--yellow)}
+.lunch-note{background:#fff6d9;border:2px solid #f2c230;border-radius:10px;padding:8px 10px;font-size:14px;margin:10px 0 4px}
 .choice{display:flex;gap:8px;align-items:center;width:100%;text-align:left;margin-bottom:6px;border-radius:12px}
 </style>
 </head>
@@ -192,7 +195,7 @@ const FIREBASE_CONFIG = {
   storageBucket: "...", messagingSenderId: "...", appId: "..."
 };
 */
-const VERSION = '1.2.0';
+const VERSION = '1.3.0';
 const DOW = ['일','월','화','수','목','금','토'];
 const DEADLINE_HOUR = 15;     // 사용 전날(앞 수업일) 오후 3시 마감
 const KEEP_DAYS = 70;         // 이보다 오래된 기록은 정리
@@ -243,7 +246,21 @@ function deadlineOf(date){
   d.setHours(DEADLINE_HOUR,0,0,0);
   return d;
 }
-function periodOf(s,p){ return s.school.periods.find(x=>x.no===p) || {no:p,start:'09:00',end:'09:40'}; }
+/* 점심시간: 교시 번호 0 으로 다룸. after 교시 다음 줄에 나옴 */
+function lunchOf(s){
+  const ps=s.school.periods, L=s.school.lunch||{};
+  const after = Math.min(Math.max(1, L.after||4), ps.length);
+  const a=ps.find(x=>x.no===after), b=ps.find(x=>x.no===after+1);
+  return {after, start: L.start || (a?a.end:'12:20'), end: L.end || (b?b.start:'13:20'), off: !!L.off};
+}
+function placeHasLunch(p){ return p.lunch!==undefined ? !!p.lunch : p.name==='강당'; }
+function rowsOf(s, placeId){
+  const L=lunchOf(s), pl=s.places.find(p=>p.id===placeId), rows=[];
+  for(const p of s.school.periods){ rows.push(p); if(p.no===L.after && !L.off && pl && placeHasLunch(pl)) rows.push({no:0, start:L.start, end:L.end, lunch:true}); }
+  return rows;
+}
+const plabel = p => Number(p)===0 ? '점심시간' : p+'교시';
+function periodOf(s,p){ if(Number(p)===0){ const L=lunchOf(s); return {no:0,start:L.start,end:L.end,lunch:true}; } return s.school.periods.find(x=>x.no===p) || {no:p,start:'09:00',end:'09:40'}; }
 function slotStart(s,date,p){ const [h,m]=periodOf(s,p).start.split(':').map(Number); const d=parseYmd(date); d.setHours(h,m,0,0); return d; }
 function placeOf(s,id){ return s.places.find(p=>p.id===id) || {id, name:'(지운 장소)', outdoor:false}; }
 function teacherOf(s,id){ return s.teachers.find(t=>t.id===id); }
@@ -275,11 +292,11 @@ function slotInfo(s, placeId, date, period, t){
 }
 
 /* 이번 달 사용 횟수(신청·바로 예약으로 쓴 것만, 체육 수업은 빼고) */
-function usageInMonth(s, who, monthPrefix){
+function usageInMonth(s, who, monthPrefix, lunch){
   let n=0;
   for(const k in s.bookings){
-    const b=s.bookings[k];
-    if((b.how==='bid'||b.how==='direct') && b.who===who && splitKey(k).date.startsWith(monthPrefix)) n++;
+    const b=s.bookings[k], sk=splitKey(k);
+    if((b.how==='bid'||b.how==='direct') && b.who===who && sk.date.startsWith(monthPrefix) && (sk.period===0)===!!lunch) n++;
   }
   return n;
 }
@@ -304,7 +321,7 @@ function resolveDue(s, t){
     delete s.bids[k]; changed = true;
     if(!list.length || s.bookings[k]) continue;
     const month = date.slice(0,7);
-    const scored = list.map(b=>({...b, used: usageInMonth(s,b.who,month)}));
+    const scored = list.map(b=>({...b, used: usageInMonth(s,b.who,month,period===0)}));
     const min = Math.min(...scored.map(x=>x.used));
     const ties = scored.filter(x=>x.used===min);
     let win, how;
@@ -315,8 +332,8 @@ function resolveDue(s, t){
       how = '사용 횟수가 같아 추첨으로';
     }
     s.bookings[k] = {teacherId:win.teacherId, who:win.who, how:'bid', at:t.toISOString()};
-    const where = placeOf(s,placeId).name+' '+dateLabel(date)+' '+period+'교시';
-    pushMsg(s, win.teacherId, `[확정] ${where} — ${how} ${win.who} 사용으로 정해졌어요.`, t);
+    const where = placeOf(s,placeId).name+' '+dateLabel(date)+' '+plabel(period);
+    pushMsg(s, win.teacherId, `[확정] ${where} — ${how} ${win.who} 사용으로 정해졌어요.${period===0?' 점심시간 강당 정리와 안전 지도는 신청한 담임 선생님이 맡아요.':''}`, t);
     for(const x of scored){
       if(x.teacherId===win.teacherId) continue;
       pushMsg(s, x.teacherId, `[아쉬워요] ${where} — ${how} ${win.who}에게 돌아갔어요. (이번 달 사용: ${x.who} ${x.used}회, ${win.who} ${win.used}회)`, t);
@@ -345,11 +362,12 @@ const A = {
     const {placeId,date,period}=splitKey(k); const i=slotInfo(s,placeId,date,period);
     if(!i.released) return {error:'비운 칸이 아니에요.'};
     if(i.booking) return {error:'이미 다른 반 사용이 확정된 칸이에요. 그 반과 먼저 이야기해 주세요.'};
-    for(const b of i.bids) pushMsg(s, b.teacherId, `[취소] ${placeOf(s,placeId).name} ${dateLabel(date)} ${period}교시 — 체육 수업으로 다시 쓰게 되어 신청이 취소되었어요.`);
+    for(const b of i.bids) pushMsg(s, b.teacherId, `[취소] ${placeOf(s,placeId).name} ${dateLabel(date)} ${plabel(period)} — 체육 수업으로 다시 쓰게 되어 신청이 취소되었어요.`);
     delete s.bids[k]; delete s.releases[k];
   },
   bid(s, me, k){
     const {placeId,date,period}=splitKey(k); const i=slotInfo(s,placeId,date,period);
+    if(period===0 && !(me.kind==='homeroom' && me.cls)) return {error:'점심시간은 담임 선생님이 반 이름으로 신청해요.'};
     if(i.st!=='bidding') return {error:'지금은 신청할 수 없는 칸이에요.'};
     const who = whoLabel(me);
     if(i.bids.some(b=>b.teacherId===me.id || b.who===who)) return {error:'이미 신청했어요.'};
@@ -363,6 +381,7 @@ const A = {
   },
   direct(s, me, k){
     const {placeId,date,period}=splitKey(k); const i=slotInfo(s,placeId,date,period);
+    if(period===0 && !(me.kind==='homeroom' && me.cls)) return {error:'점심시간은 담임 선생님이 반 이름으로 신청해요.'};
     if(i.st!=='direct') return {error: i.st==='booked'?'방금 다른 반이 먼저 예약했어요.':'지금은 바로 예약할 수 없는 칸이에요.'};
     s.bookings[k] = {teacherId:me.id, who:whoLabel(me), how:'direct', at:now().toISOString()};
   },
@@ -373,7 +392,7 @@ const A = {
     if(b.how==='rain' && b.from){ delete s.rain[skey(b.from, splitKey(k).date, splitKey(k).period)]; }
     if(b.teacherId!==me.id){
       const {placeId,date,period}=splitKey(k);
-      pushMsg(s, b.teacherId, `[취소] ${placeOf(s,placeId).name} ${dateLabel(date)} ${period}교시 예약을 ${me.name} 선생님이 취소했어요.`);
+      pushMsg(s, b.teacherId, `[취소] ${placeOf(s,placeId).name} ${dateLabel(date)} ${plabel(period)} 예약을 ${me.name} 선생님이 취소했어요.`);
     }
     delete s.bookings[k];
   },
@@ -600,8 +619,8 @@ function renderBoard(){
   <div class="places">${S.places.map(p=>`<button class="${p.id===ui.place?'on':''}" data-act="place" data-id="${p.id}">${esc(p.name)}${p.outdoor?' (실외)':''}</button>`).join('')}</div>
   <div class="gridwrap"><table class="grid"><thead><tr><th style="width:76px">교시</th>
   ${days.map(d=>`<th class="${d===today?'today':''}">${dateLabel(d)}</th>`).join('')}</tr></thead><tbody>`;
-  for(const p of S.school.periods){
-    html += `<tr><td class="per"><b>${p.no}교시</b>${p.start}</td>`;
+  for(const p of rowsOf(S, ui.place)){
+    html += `<tr class="${p.lunch?'lunchrow':''}"><td class="per"><b>${p.lunch?'점심':p.no+'교시'}</b>${p.start}</td>`;
     for(const d of days) html += `<td>${renderCell(slotInfo(S,ui.place,d,p.no))}</td>`;
     html += `</tr>`;
   }
@@ -660,9 +679,12 @@ function slotModal(k){
   const pl = placeOf(S,placeId), pr=periodOf(S,period);
   const myWho = whoLabel(ME);
   const peOwner = i.tt && (i.tt.teacherId===ME.id || ME.admin || isPE(ME));
-  let h = `<h2>${esc(pl.name)} · ${dateLabel(date)} ${period}교시</h2><div class="muted">${pr.start} ~ ${pr.end}${pl.outdoor?' · 실외':''}</div>`;
+  let h = `<h2>${esc(pl.name)} · ${dateLabel(date)} ${plabel(period)}</h2><div class="muted">${pr.start} ~ ${pr.end}${pl.outdoor?' · 실외':''}</div>`;
   const acts=[];
   const month = date.slice(0,7);
+  const lunch = period===0;
+  const canLunch = ME.kind==='homeroom' && !!ME.cls;
+  if(lunch) h += `<p class="lunch-note">${'점심시간 강당 정리와 안전 지도는 신청한 담임 선생님이 맡아요.'}</p>`;
   switch(i.st){
     case 'pe':
       h += `<span class="status"><i class="mag red"></i>체육 수업 · 1순위</span><p>${esc(i.tt.cls)} 체육 (${esc(tName(S,i.tt.teacherId))} 선생님)</p>`;
@@ -689,11 +711,12 @@ function slotModal(k){
       h += `<span class="status"><i class="mag orange"></i>신청 받는 중</span><p>마감: <b>${dateLabel(ymd(i.dl))} 오후 3시</b><br><span class="muted">마감 뒤 이번 달에 덜 쓴 반이 먼저, 같으면 추첨으로 정해요.</span></p>`;
       if(i.released) h+=`<p class="muted">원래 ${esc(i.tt.cls)} 체육 시간인데 체육 선생님이 비운 칸이에요.</p>`;
       h += `<h3>신청한 반 (${i.bids.length})</h3>`;
-      h += i.bids.length ? `<ul class="list">${i.bids.map(b=>`<li><b>${esc(b.who)}</b><span class="muted">${esc(tName(S,b.teacherId))} · 이번 달 ${usageInMonth(S,b.who,month)}회 사용</span></li>`).join('')}</ul>` : `<p class="muted">아직 신청한 반이 없어요.</p>`;
+      h += i.bids.length ? `<ul class="list">${i.bids.map(b=>`<li><b>${esc(b.who)}</b><span class="muted">${esc(tName(S,b.teacherId))} · 이번 달 ${lunch?'점심시간 ':''}${usageInMonth(S,b.who,month,lunch)}회 사용</span></li>`).join('')}</ul>` : `<p class="muted">아직 신청한 반이 없어요.</p>`;
       const mine = i.bids.some(b=>b.teacherId===ME.id);
       if(mine) acts.push(`<button class="warn" data-act="unbid" data-k="${esc(k)}">신청 취소</button>`);
-      else if(!isPE(ME) || ME.cls) acts.push(`<button class="pri" data-act="bid" data-k="${esc(k)}">${esc(myWho)} 신청하기</button>`);
-      h += `<p class="muted">우리(${esc(myWho)}) 이번 달 사용: ${usageInMonth(S,myWho,month)}회</p>`;
+      else if(lunch ? canLunch : (!isPE(ME) || ME.cls)) acts.push(`<button class="pri" data-act="bid" data-k="${esc(k)}">${esc(myWho)} 신청하기${lunch?' (정리·안전 지도 함께)':''}</button>`);
+      else if(lunch) h += `<p class="muted">점심시간은 담임 선생님만 신청할 수 있어요.</p>`;
+      if(!lunch || canLunch) h += `<p class="muted">우리(${esc(myWho)}) 이번 달 ${lunch?'점심시간 ':''}사용: ${usageInMonth(S,myWho,month,lunch)}회</p>`;
       if(i.released && peOwner) acts.push(`<button data-act="unrelease" data-k="${esc(k)}">다시 체육 수업으로</button>`);
       break; }
     case 'resolving':
@@ -701,7 +724,8 @@ function slotModal(k){
     case 'direct':
       h += `<span class="status"><i class="mag slot" style="border-color:#999"></i>남은 칸</span><p>신청이 마감되었고 아무도 쓰지 않는 칸이에요. 먼저 누르는 반이 써요.</p>`;
       if(i.released) h+=`<p class="muted">원래 ${esc(i.tt.cls)} 체육 시간인데 체육 선생님이 비운 칸이에요.</p>`;
-      if(!isPE(ME) || ME.cls) acts.push(`<button class="pri" data-act="direct" data-k="${esc(k)}">${esc(myWho)} 바로 예약</button>`);
+      if(lunch ? canLunch : (!isPE(ME) || ME.cls)) acts.push(`<button class="pri" data-act="direct" data-k="${esc(k)}">${esc(myWho)} 바로 예약${lunch?' (정리·안전 지도 함께)':''}</button>`);
+      else if(lunch) h += `<p class="muted">점심시간은 담임 선생님만 신청할 수 있어요.</p>`;
       if(i.released && peOwner) acts.push(`<button data-act="unrelease" data-k="${esc(k)}">다시 체육 수업으로</button>`);
       break;
     case 'pastopen': h += `<p class="muted">지난 시간이에요.</p>`; break;
@@ -738,12 +762,12 @@ function renderMine(){
   const sortK = (a,b)=>{ const A=splitKey(a),B=splitKey(b); return A.date<B.date?-1:A.date>B.date?1:A.period-B.period; };
   const books = Object.keys(S.bookings).filter(k=>S.bookings[k].who===myWho && splitKey(k).date>=today).sort(sortK);
   const bids = Object.keys(S.bids).filter(k=>S.bids[k].some(b=>b.teacherId===ME.id)).sort(sortK);
-  const line = k => { const {placeId,date,period}=splitKey(k); return `<b>${dateLabel(date)} ${period}교시</b> ${esc(placeOf(S,placeId).name)}`; };
+  const line = k => { const {placeId,date,period}=splitKey(k); return `<b>${dateLabel(date)} ${plabel(period)}</b> ${esc(placeOf(S,placeId).name)}`; };
   let h = `<div class="card"><h2>확정된 사용 (${books.length})</h2>`;
   h += books.length? `<ul class="list">${books.map(k=>`<li>${line(k)} <span class="muted">${S.bookings[k].how==='rain'?'우천 이동':S.bookings[k].how==='bid'?'신청 확정':'바로 예약'}</span><span class="sp"></span><button class="small" data-act="slot" data-k="${esc(k)}">보기</button></li>`).join('')}</ul>` : `<p class="muted">아직 없어요.</p>`;
   h += `</div><div class="card"><h2>신청 중 (${bids.length})</h2>`;
   h += bids.length? `<ul class="list">${bids.map(k=>`<li>${line(k)} <span class="muted">${S.bids[k].length}반 신청 · 마감 ${dateLabel(ymd(deadlineOf(splitKey(k).date)))} 오후 3시</span><span class="sp"></span><button class="small" data-act="slot" data-k="${esc(k)}">보기</button></li>`).join('')}</ul>` : `<p class="muted">아직 없어요.</p>`;
-  h += `</div><div class="card"><h2>이번 달 사용 횟수</h2><p>${esc(myWho)}: <b>${usageInMonth(S,myWho,today.slice(0,7))}회</b> <span class="muted">(신청·바로 예약으로 쓴 횟수. 여러 반이 신청할 때 이 숫자가 적은 반이 먼저예요.)</span></p></div>`;
+  h += `</div><div class="card"><h2>이번 달 사용 횟수</h2><p>${esc(myWho)} 수업 시간: <b>${usageInMonth(S,myWho,today.slice(0,7),false)}회</b> · 점심시간: <b>${usageInMonth(S,myWho,today.slice(0,7),true)}회</b></p><p class="muted">신청·바로 예약으로 쓴 횟수예요. 여러 반이 신청하면 이 숫자가 적은 반이 먼저이고, 수업 시간과 점심시간은 따로 셈해요.</p></div>`;
   if(isPE(ME)){
     const rel = Object.keys(S.releases).filter(k=>splitKey(k).date>=today).sort(sortK);
     h += `<div class="card"><h2>내가 비운 체육 시간 (${rel.length})</h2>`;
@@ -777,8 +801,15 @@ function renderSettings(){
     <label class="muted">한 시간 길이(분)</label><input id="set-len" type="number" min="20" max="90" value="${periodLen()}" style="width:80px">
     <button data-act="per-add">교시 더하기</button><button data-act="per-del" ${s.school.periods.length<=1?'disabled':''}>마지막 교시 빼기</button>
     <button class="pri" data-act="save-periods">저장</button></div></div>`;
+  const L=lunchOf(s);
+  h += `<div class="card"><h2>점심시간</h2><p class="muted">'점심시간 신청'을 켠 장소(기본: 강당)에 점심시간 줄이 생겨요. 담임 선생님만 반 이름으로 신청하고, 정리와 안전 지도도 그 담임 선생님이 맡아요. 사용 횟수는 수업 시간과 따로 셈해요.</p>
+    <div class="row"><label class="small"><input type="checkbox" id="lu-on" ${L.off?'':'checked'}> 점심시간 신청 받기</label>
+    <span class="field" style="margin:0"><label>몇 교시 다음</label><select id="lu-after">${s.school.periods.map(p=>`<option value="${p.no}" ${p.no===L.after?'selected':''}>${p.no}교시 다음</option>`).join('')}</select></span>
+    <span class="field" style="margin:0"><label>시작</label><input type="time" id="lu-start" value="${L.start}" style="width:120px"></span>
+    <span class="field" style="margin:0"><label>끝</label><input type="time" id="lu-end" value="${L.end}" style="width:120px"></span>
+    <button class="pri" data-act="save-lunch">저장</button></div></div>`;
   h += `<div class="card"><h2>장소</h2><p class="muted">학교 사정에 맞게 체육 관련 장소를 더하거나 빼세요. '실외'로 표시한 곳의 수업만 비 오는 날 실내로 옮길 수 있어요.</p><ul class="list">
-    ${s.places.map(p=>`<li><input data-pname="${p.id}" value="${esc(p.name)}" style="width:160px"><label class="small"><input type="checkbox" data-pout="${p.id}" ${p.outdoor?'checked':''}> 실외</label><span class="sp"></span><button class="small warn" data-act="place-del" data-id="${p.id}">빼기</button></li>`).join('')}
+    ${s.places.map(p=>`<li><input data-pname="${p.id}" value="${esc(p.name)}" style="width:160px"><label class="small"><input type="checkbox" data-pout="${p.id}" ${p.outdoor?'checked':''}> 실외</label><label class="small"><input type="checkbox" data-plunch="${p.id}" ${placeHasLunch(p)?'checked':''}> 점심시간 신청</label><span class="sp"></span><button class="small warn" data-act="place-del" data-id="${p.id}">빼기</button></li>`).join('')}
     </ul><div class="row"><input id="new-place" placeholder="예: 다목적실, 무용실, 탁구장"><label class="small"><input type="checkbox" id="new-place-out"> 실외</label><button data-act="place-add">더하기</button><span class="sp"></span><button class="pri" data-act="save-places">이름·실외 저장</button></div></div>`;
   h += `<div class="card"><h2>체육 수업 시간표 (1순위)</h2><p class="muted">한 번 넣어 두면 매주 자동으로 체육 칸이 잡혀요. 칸마다 반을 고르면 바로 저장돼요.</p>
     <div class="places">${s.places.map(p=>`<button class="${p.id===ui.ttPlace?'on':''}" data-act="ttplace" data-id="${p.id}">${esc(p.name)}</button>`).join('')}</div>
@@ -911,9 +942,16 @@ document.addEventListener('click', async e=>{
       const names={}, outs={};
       document.querySelectorAll('[data-pname]').forEach(x=>names[x.dataset.pname]=x.value.trim());
       document.querySelectorAll('[data-pout]').forEach(x=>outs[x.dataset.pout]=x.checked);
-      if(await act(s=>{ s.places.forEach(p=>{ if(names[p.id]) p.name=names[p.id]; if(p.id in outs) p.outdoor=outs[p.id]; }); })) toast('저장했어요.');
+      const lun={}; document.querySelectorAll('[data-plunch]').forEach(x=>lun[x.dataset.plunch]=x.checked);
+      if(await act(s=>{ s.places.forEach(p=>{ if(names[p.id]) p.name=names[p.id]; if(p.id in outs) p.outdoor=outs[p.id]; if(p.id in lun) p.lunch=lun[p.id]; }); })) toast('저장했어요.');
       break; }
     case 'ttplace': ui.ttPlace=id; render(); break;
+    case 'save-lunch': {
+      const on=document.getElementById('lu-on').checked, after=Number(document.getElementById('lu-after').value),
+            st=document.getElementById('lu-start').value, en=document.getElementById('lu-end').value;
+      if(!st||!en||st>=en) return toast('점심시간 시작과 끝을 확인해 주세요.');
+      if(await act(s=>{ s.school.lunch={after, start:st, end:en, off:!on}; })) toast('저장했어요.');
+      break; }
     case 't-admin': await act((s,me)=>{ if(!me.admin) return {error:'관리자만 바꿀 수 있어요.'}; const t=teacherOf(s,id); if(t) t.admin=!t.admin; }); break;
     case 't-del': {
       if(ui.confirmDel!==id){ ui.confirmDel=id; toast('한 번 더 누르면 이 선생님을 내보내요. 신청과 예약도 함께 지워져요.'); return; }

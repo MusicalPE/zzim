@@ -137,6 +137,36 @@ async def main():
         ok(await pg.evaluate("window.__jjim.S.school.periods.length")==7,'교시 더하기')
         await pg.click('[data-act=view][data-v=mine]'); ok('내가 비운' in await pg.inner_text('main'),'내 예약 화면(체육)')
         # 모바일 화면
+        # 점심시간
+        await pg.click('[data-act=view][data-v=board]'); await pg.click('[data-act=place][data-id=p_hall]')
+        await pg.evaluate("window.__jjim.setNow('2026-12-01T09:00:00')"); await pg.click('[data-act=week][data-d="0"]')
+        ok(await pg.locator('tr.lunchrow').count()==1,'강당에 점심시간 줄')
+        await pg.click('[data-act=place][data-id=p_field]')
+        ok(await pg.locator('tr.lunchrow').count()==0,'운동장에는 점심시간 줄 없음')
+        kl='p_hall|2026-12-03|0'
+        r=await pg.evaluate(f"window.__jjim.store().update(s=>window.__jjim.A.bid(s,s.teachers.find(t=>t.id==='t_en'),'{kl}'))")
+        ok(r.get('error') is not None,'교과 선생님은 점심시간 신청 못함')
+        r=await pg.evaluate(f"window.__jjim.store().update(s=>window.__jjim.A.bid(s,s.teachers.find(t=>t.id==='t_pe'),'{kl}'))")
+        ok(r.get('error') is not None,'체육 선생님도 점심시간 신청 못함')
+        # 6-1은 수업 시간을 많이 썼지만 점심시간은 0회, 6-2는 점심시간 1회
+        await pg.evaluate("""window.__jjim.store().update(s=>{for(let d=2;d<=5;d++) s.bookings['p_multi|2026-12-0'+d+'|6']={teacherId:'t_61',who:'6-1',how:'direct',at:'x'}; s.bookings['p_hall|2026-12-01|0']={teacherId:'t_62',who:'6-2',how:'direct',at:'x'};})""")
+        for tid in ['t_61','t_62']:
+            r=await pg.evaluate(f"window.__jjim.store().update(s=>window.__jjim.A.bid(s,s.teachers.find(t=>t.id==='{tid}'),'{kl}'))")
+            ok(r.get('ok'),'담임 점심시간 신청 '+tid)
+        await pg.evaluate("window.__jjim.setNow('2026-12-02T15:00:30')"); await pg.wait_for_timeout(300)
+        bk=await pg.evaluate(f"window.__jjim.S.bookings['{kl}']")
+        ok(bk and bk['who']=='6-1','점심시간은 점심시간 사용 횟수로만 비교(6-1 확정): '+str(bk and bk['who']))
+        msg=await pg.evaluate("window.__jjim.S.messages.filter(m=>m.to==='t_61').map(m=>m.text).join('|')")
+        ok('정리와 안전 지도' in msg,'확정 알림에 정리·안전 지도 안내')
+        await login('윤새벽'); await pg.click('[data-act=place][data-id=p_hall]')
+        await pg.click(f'[data-k="{kl}"].cell'); mt=await pg.inner_text('.modal')
+        ok('점심시간' in mt and '안전 지도' in mt,'점심시간 칸 창에 안내')
+        await pg.click('[data-act=close]')
+        # 설정에서 점심시간 끄기
+        await login('김체육'); await pg.click('[data-act=view][data-v=settings]')
+        await pg.uncheck('#lu-on'); await pg.click('[data-act=save-lunch]'); await pg.wait_for_timeout(150)
+        await pg.click('[data-act=view][data-v=board]'); await pg.click('[data-act=place][data-id=p_hall]')
+        ok(await pg.locator('tr.lunchrow').count()==0,'점심시간 끄면 줄 사라짐')
         ok(not errs,'콘솔 오류 없음 '+str(errs[:3]))
         await b.close()
     print('FAILS',len(fails))
