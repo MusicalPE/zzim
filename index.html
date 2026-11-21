@@ -178,6 +178,27 @@ nav.tabs a.fb:hover{background:rgba(255,255,255,.08)}
 .mergelist{display:flex;flex-wrap:wrap;gap:6px 14px;margin:8px 0}
 .mergelist label{font-size:14px;white-space:nowrap}
 .ttbtn{width:100%;border-radius:8px;border-width:1px;padding:4px;font-size:13px;background:transparent}
+.daytabs{display:flex;gap:6px;margin-bottom:10px}
+.daytabs button{flex:1;display:flex;flex-direction:column;align-items:center;padding:6px 0;border-radius:12px;line-height:1.2}
+.daytabs button small{font-size:11px;opacity:.75}
+.board .daytabs button.on{background:#fff;color:var(--board);border-color:#fff}
+.board .daytabs button.today:not(.on){border-color:var(--yellow);color:var(--yellow)}
+table.grid.one{min-width:0}
+@media (max-width:700px){
+  .wrap{padding:10px}
+  header.top .wrap{gap:6px 10px;padding-top:7px;padding-bottom:7px}
+  .logo{font-size:24px}.logo-mark{width:26px;height:26px}
+  .school{font-size:12px;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  header.top .sp{display:none}
+  nav.tabs{order:3;width:100%;flex-wrap:nowrap;overflow-x:auto}
+  nav.tabs button,nav.tabs a.fb{padding:5px 10px;font-size:14px;white-space:nowrap}
+  .who{order:2;font-size:12px;white-space:nowrap}
+  .board{padding:12px 10px;border-width:8px}
+  .toolbar{gap:6px}.toolbar button{padding:5px 10px;font-size:13px}
+  .weeklabel{font-size:16px;min-width:0;flex:1}
+  .places button{padding:5px 12px;font-size:14px}
+  .demo-bar .wrap{font-size:12px}
+}
 .choice{display:flex;gap:8px;align-items:center;width:100%;text-align:left;margin-bottom:6px;border-radius:12px}
 </style>
 </head>
@@ -205,7 +226,7 @@ const FIREBASE_CONFIG = {
   storageBucket: "...", messagingSenderId: "...", appId: "..."
 };
 */
-const VERSION = '1.5.3';
+const VERSION = '1.6.0';
 const BETA = true;            // 시험판 표시 (앱 모음에 공개할 때 false 로)
 const FEEDBACK_URL = 'https://musicalpe.github.io/hearim/?p=vcxwx2';      // 의견 받기 설문 주소 (헤아림). 비어 있으면 '의견 보내기' 단추가 숨겨짐
 const DOW = ['일','월','화','수','목','금','토'];
@@ -222,6 +243,8 @@ const pad = n => String(n).padStart(2,'0');
 const ymd = d => d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());
 function parseYmd(s){ const [y,m,d]=s.split('-').map(Number); return new Date(y,m-1,d); }
 function addDays(d,n){ const x=new Date(d); x.setDate(x.getDate()+n); return x; }
+/* 주말에는 다음 주를 '이번 주'로 보여 줌 */
+function boardMonday(){ const t=now(), w=t.getDay(); return ymd(addDays(mondayOf(t), (w===0||w===6)?7:0)); }
 function mondayOf(d){ const x=new Date(d.getFullYear(),d.getMonth(),d.getDate()); const w=x.getDay(); return addDays(x, w===0?-6:1-w); }
 const esc = s => String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const uid = () => Math.random().toString(36).slice(2,9)+Date.now().toString(36).slice(-4);
@@ -609,7 +632,7 @@ async function googleSignIn(){
 
 /* ---------- 화면 상태 ---------- */
 const DEMO = !FIREBASE_CONFIG || /[?&]demo(=|&|$)/.test(location.search);  // ?demo 를 붙이면 설정이 있어도 체험 모드
-const ui = { view:'board', week: ymd(mondayOf(now())), place:null, modal:null, loginStep:'code', code:'', pickTeacher:null, ttPlace:null, ttTeacher:null };
+const ui = { view:'board', week: boardMonday(), place:null, modal:null, loginStep:'code', code:'', pickTeacher:null, ttPlace:null, ttTeacher:null };
 let store=null, S=null, ME=null, unsub=null, resolving=false, AUTH=null;
 
 function toast(t){ document.querySelectorAll('.toast').forEach(x=>x.remove()); const e=document.createElement('div'); e.className='toast'; e.textContent=t; document.body.appendChild(e); setTimeout(()=>e.remove(),2600); }
@@ -677,17 +700,21 @@ function tabBtn(v,label){ return `<button class="${ui.view===v?'on':''}" data-ac
 function renderBoard(){
   if(!S.places.length) return `<div class="card">등록된 장소가 없어요. 설정에서 장소를 추가해 주세요.</div>`;
   const mon = parseYmd(ui.week);
-  const days = [0,1,2,3,4].map(i=>ymd(addDays(mon,i)));
+  const allDays = [0,1,2,3,4].map(i=>ymd(addDays(mon,i)));
   const today = ymd(now());
   const fri = addDays(mon,4);
+  const narrow = isNarrow();
+  if(ui.dayIdx==null || ui.dayWeek!==ui.week){ const ti=allDays.indexOf(today); ui.dayIdx = ti>=0?ti:0; ui.dayWeek=ui.week; }
+  const days = narrow ? [allDays[ui.dayIdx]] : allDays;
   let html = `<div class="board"><div class="toolbar">
     <button data-act="week" data-d="-7">이전 주</button>
-    <span class="weeklabel">${mon.getMonth()+1}월 ${mon.getDate()}일 ~ ${fri.getMonth()+1}월 ${fri.getDate()}일</span>
+    <span class="weeklabel">${narrow?`${mon.getMonth()+1}/${mon.getDate()} ~ ${fri.getMonth()+1}/${fri.getDate()}`:`${mon.getMonth()+1}월 ${mon.getDate()}일 ~ ${fri.getMonth()+1}월 ${fri.getDate()}일`}</span>
     <button data-act="week" data-d="7">다음 주</button>
-    <button data-act="week" data-d="0">이번 주</button>
+    <button data-act="week" data-d="0">${(now().getDay()===0||now().getDay()===6)?'다가올 주':'이번 주'}</button>
   </div>
   <div class="places">${S.places.map(p=>`<button class="${p.id===ui.place?'on':''}" data-act="place" data-id="${p.id}">${esc(p.name)}${p.outdoor?' (실외)':''}</button>`).join('')}</div>
-  <div class="gridwrap"><table class="grid"><thead><tr><th style="width:76px">교시</th>
+  ${narrow?`<div class="daytabs">${allDays.map((d,i)=>{ const dd=parseYmd(d); return `<button class="${i===ui.dayIdx?'on':''}${d===today?' today':''}" data-act="day" data-i="${i}"><b>${DOW[dd.getDay()]}</b><small>${dd.getMonth()+1}/${dd.getDate()}</small></button>`; }).join('')}</div>`:''}
+  <div class="gridwrap"><table class="grid${narrow?' one':''}"><thead><tr><th style="width:76px">교시</th>
   ${days.map(d=>`<th class="${d===today?'today':''}">${dateLabel(d)}</th>`).join('')}</tr></thead><tbody>`;
   for(const p of rowsOf(S, ui.place)){
     html += `<tr class="${p.lunch?'lunchrow':''}"><td class="per"><b>${p.lunch?'점심':p.no+'교시'}</b>${p.start}</td>`;
@@ -706,6 +733,9 @@ function renderBoard(){
   <p class="board-note">신청 마감은 사용 전 수업일 오후 3시 (월요일 칸은 금요일 3시) · 여러 반이 신청하면 이번 달에 덜 쓴 반 먼저, 같으면 추첨 · 마감 뒤 남은 칸은 먼저 누르는 반이 사용</p></div>`;
   return html;
 }
+function isNarrow(){ try{ return window.matchMedia('(max-width: 700px)').matches; }catch(e){ return window.innerWidth<=700; } }
+let _wasNarrow=null;
+window.addEventListener('resize', ()=>{ const n=isNarrow(); if(_wasNarrow!==null && n!==_wasNarrow && ME && ui.view==='board') render(); _wasNarrow=n; });
 function dlShort(d){ return DOW[d.getDay()]+' '+d.getHours()+'시'; }
 function renderCell(i){
   const myWho = whoLabel(ME);
@@ -999,8 +1029,9 @@ document.addEventListener('click', async e=>{
         render(); await store.update(s=>{ s.messages.forEach(m=>{ if(m.to===ME.id) m.read=true; }); }); return; }
       render(); break;
     case 'logout': logout(); break;
-    case 'week': { const d=Number(b.dataset.d); ui.week = d===0? ymd(mondayOf(now())) : ymd(addDays(parseYmd(ui.week),d)); render(); break; }
+    case 'week': { const d=Number(b.dataset.d); ui.week = d===0? boardMonday() : ymd(addDays(parseYmd(ui.week),d)); render(); break; }
     case 'place': ui.place=id; render(); break;
+    case 'day': ui.dayIdx=Number(b.dataset.i); render(); break;
     case 'slot': ui.modal={type:'slot',k}; renderModal(); break;
     case 'close': ui.modal=null; renderModal(); break;
     case 'copy-invite': await copyText(inviteUrl(DEMO?'demo':ui.code)); break;
