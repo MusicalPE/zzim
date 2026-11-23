@@ -205,6 +205,10 @@ table.grid.one{min-width:0}
 .steps span.done{background:#dfeee6;color:var(--ok)}
 .gradegrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
 .gradegrid label{display:flex;align-items:center;gap:6px;font-size:14px}
+.gradegrid label{white-space:nowrap}
+.gradegrid.wide{grid-template-columns:repeat(auto-fill,minmax(250px,1fr))}
+.gradegrid input[type=time]{width:130px}
+.gradegrid.wide label b{min-width:86px}
 .gradegrid label b{min-width:64px}
 .gradegrid input[type=number]{width:70px}
 .presetrow{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}
@@ -236,7 +240,7 @@ const FIREBASE_CONFIG = {
   storageBucket: "...", messagingSenderId: "...", appId: "..."
 };
 */
-const VERSION = '1.7.0';
+const VERSION = '1.7.1';
 const BETA = true;            // 시험판 표시 (앱 모음에 공개할 때 false 로)
 const FEEDBACK_URL = 'https://musicalpe.github.io/hearim/?p=vcxwx2';      // 의견 받기 설문 주소 (헤아림). 비어 있으면 '의견 보내기' 단추가 숨겨짐
 const DOW = ['일','월','화','수','목','금','토'];
@@ -920,7 +924,7 @@ function renderSetup(){
     const brk = ps[1]? toMin(ps[1].start)-toMin(ps[0].end) : 10;
     const llen = Math.max(30, toMin(L.end)-toMin(L.start));
     h+=`<h2>교시와 점심시간</h2><p class="muted">값을 바꾸면 아래 시간표가 바로 계산돼요. 교시마다 시간이 다르면 나중에 설정에서 고칠 수 있어요.</p>
-      <div class="gradegrid">
+      <div class="gradegrid wide">
         <label><b>교시 수</b><input type="number" id="su-n" min="3" max="8" value="${ps.length}"></label>
         <label><b>1교시 시작</b><input type="time" id="su-start" value="${ps[0]?ps[0].start:'09:00'}"></label>
         <label><b>수업 길이</b><input type="number" id="su-len" min="20" max="90" value="${len}"> 분</label>
