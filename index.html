@@ -199,6 +199,16 @@ table.grid.one{min-width:0}
   .places button{padding:5px 12px;font-size:14px}
   .demo-bar .wrap{font-size:12px}
 }
+.steps{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px}
+.steps span{font-size:13px;padding:3px 10px;border-radius:999px;background:#eeece5;color:var(--sub)}
+.steps span.on{background:var(--ink);color:#fff;font-weight:700}
+.steps span.done{background:#dfeee6;color:var(--ok)}
+.gradegrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+.gradegrid label{display:flex;align-items:center;gap:6px;font-size:14px}
+.gradegrid label b{min-width:64px}
+.gradegrid input[type=number]{width:70px}
+.presetrow{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}
+.setup-nudge{border-color:#f2c230}
 .choice{display:flex;gap:8px;align-items:center;width:100%;text-align:left;margin-bottom:6px;border-radius:12px}
 </style>
 </head>
@@ -226,7 +236,7 @@ const FIREBASE_CONFIG = {
   storageBucket: "...", messagingSenderId: "...", appId: "..."
 };
 */
-const VERSION = '1.6.0';
+const VERSION = '1.7.0';
 const BETA = true;            // 시험판 표시 (앱 모음에 공개할 때 false 로)
 const FEEDBACK_URL = 'https://musicalpe.github.io/hearim/?p=vcxwx2';      // 의견 받기 설문 주소 (헤아림). 비어 있으면 '의견 보내기' 단추가 숨겨짐
 const DOW = ['일','월','화','수','목','금','토'];
@@ -540,6 +550,7 @@ function emptySchool(name){
 function demoSchool(){
   const s = emptySchool('햇살초등학교');
   s.school.classes = ['1-1','1-2','2-1','2-2','3-1','3-2','4-1','4-2','5-1','5-2','6-1','6-2'];
+  s.school.setupDone = true;
   s.places.push({id:'p_multi',name:'다목적실',outdoor:false});
   const T = (id,name,kind,cls,admin) => ({id,name,kind,cls:cls||'',admin:!!admin});
   s.teachers = [
@@ -690,9 +701,10 @@ function render(){
     </nav>
     <span class="who">${esc(ME.name)}${ME.cls?' · '+esc(ME.cls):''} <button class="ghost small" data-act="${DEMO?'logout':'signout'}">나가기</button></span>
   </div></header>
-  <main class="wrap">${ ui.view==='board'?renderBoard(): ui.view==='mine'?renderMine(): ui.view==='inbox'?renderInbox(): renderSettings() }</main>
+  <main class="wrap">${ ui.view==='setup'?renderSetup(): ui.view==='board'?renderBoard(): ui.view==='mine'?renderMine(): ui.view==='inbox'?renderInbox(): renderSettings() }</main>
   <footer>찜! ${VERSION} · 음악적체육인</footer>`;
   renderModal();
+  if(ui.view==='setup') setupPreview();
 }
 function tabBtn(v,label){ return `<button class="${ui.view===v?'on':''}" data-act="view" data-v="${v}">${label}</button>`; }
 
@@ -706,7 +718,8 @@ function renderBoard(){
   const narrow = isNarrow();
   if(ui.dayIdx==null || ui.dayWeek!==ui.week){ const ti=allDays.indexOf(today); ui.dayIdx = ti>=0?ti:0; ui.dayWeek=ui.week; }
   const days = narrow ? [allDays[ui.dayIdx]] : allDays;
-  let html = `<div class="board"><div class="toolbar">
+  let html = (!S.school.setupDone && canManage(ME)) ? `<div class="card row setup-nudge"><div style="flex:1"><b>아직 학교 설정을 마치지 않았어요.</b><br><span class="muted">도우미를 따라 학급·장소·교시·체육 시간표를 넣으면 바로 쓸 수 있어요.</span></div><button class="pri" data-act="setup-open">첫 설정 도우미</button></div>` : '';
+  html += `<div class="board"><div class="toolbar">
     <button data-act="week" data-d="-7">이전 주</button>
     <span class="weeklabel">${narrow?`${mon.getMonth()+1}/${mon.getDate()} ~ ${fri.getMonth()+1}/${fri.getDate()}`:`${mon.getMonth()+1}월 ${mon.getDate()}일 ~ ${fri.getMonth()+1}월 ${fri.getDate()}일`}</span>
     <button data-act="week" data-d="7">다음 주</button>
@@ -882,6 +895,78 @@ function switchModal(){
 }
 function kindLabel(t){ return t.kind==='pe'?'체육':t.kind==='homeroom'?'담임':'교과·기타'; }
 
+/* ----- 첫 설정 도우미 ----- */
+const SETUP_STEPS=['학급','장소','교시','체육 시간표','선생님 초대'];
+const PLACE_PRESETS=[['강당',false,true],['운동장',true,false],['체육관',false,true],['다목적실',false,false],['무용실',false,false],['탁구장',false,false]];
+function renderSetup(){
+  if(!canManage(ME)) return `<div class="card">체육 선생님만 열 수 있어요.</div>`;
+  const st=ui.setupStep||0, s=S;
+  let h=`<div class="card"><div class="steps">${SETUP_STEPS.map((n,i)=>`<span class="${i===st?'on':i<st?'done':''}">${i+1}. ${n}</span>`).join('')}</div>`;
+  if(st===0){
+    const cnt={}; let extra=[];
+    for(const c of s.school.classes){ const m=c.match(/^([1-6])-(\d+)$/); if(m) cnt[m[1]]=Math.max(cnt[m[1]]||0, Number(m[2])); else extra.push(c); }
+    h+=`<h2>학년마다 반이 몇 개인가요?</h2><p class="muted">숫자만 넣으면 학급 목록(예: 3-1, 3-2)을 만들어요. 없는 학년은 0으로 두세요.</p>
+      <div class="gradegrid">${[1,2,3,4,5,6].map(g=>`<label><b>${g}학년</b><input type="number" min="0" max="20" data-gc="${g}" value="${cnt[g]||0}"> 반</label>`).join('')}</div>
+      <div class="field" style="margin-top:12px"><label>그 밖의 학급 (쉼표로, 예: 특수, 병설)</label><input id="su-extra" value="${esc(extra.join(', '))}"></div>`;
+  } else if(st===1){
+    h+=`<h2>체육 수업에 쓰는 장소를 골라 주세요</h2><p class="muted">눌러서 넣고 빼요. 학교에 맞는 이름을 직접 더할 수도 있어요. '실외'로 표시된 곳의 수업만 비 오는 날 실내로 옮길 수 있어요.</p>
+      <div class="presetrow">${PLACE_PRESETS.map(([n])=>{ const has=s.places.some(p=>p.name===n); return `<button class="${has?'pri':''}" data-act="su-place" data-n="${esc(n)}">${has?'넣음 · ':''}${esc(n)}</button>`; }).join('')}</div>
+      <ul class="list">${s.places.map(p=>`<li><b>${esc(p.name)}</b><label class="small"><input type="checkbox" data-sout="${p.id}" ${p.outdoor?'checked':''}> 실외</label><label class="small"><input type="checkbox" data-slunch="${p.id}" ${placeHasLunch(p)?'checked':''}> 점심시간 신청</label><span class="sp"></span><button class="small warn" data-act="su-place-del" data-id="${p.id}">빼기</button></li>`).join('')||'<li class="muted">아직 없어요.</li>'}</ul>
+      <div class="row"><input id="su-newplace" placeholder="직접 더하기 (예: 실내놀이터)"><button data-act="su-place-add">더하기</button></div>`;
+  } else if(st===2){
+    const ps=s.school.periods, L=lunchOf(s);
+    const toMin=t=>{ const [a,b]=t.split(':').map(Number); return a*60+b; };
+    const len = ps[0]? toMin(ps[0].end)-toMin(ps[0].start) : 40;
+    const brk = ps[1]? toMin(ps[1].start)-toMin(ps[0].end) : 10;
+    const llen = Math.max(30, toMin(L.end)-toMin(L.start));
+    h+=`<h2>교시와 점심시간</h2><p class="muted">값을 바꾸면 아래 시간표가 바로 계산돼요. 교시마다 시간이 다르면 나중에 설정에서 고칠 수 있어요.</p>
+      <div class="gradegrid">
+        <label><b>교시 수</b><input type="number" id="su-n" min="3" max="8" value="${ps.length}"></label>
+        <label><b>1교시 시작</b><input type="time" id="su-start" value="${ps[0]?ps[0].start:'09:00'}"></label>
+        <label><b>수업 길이</b><input type="number" id="su-len" min="20" max="90" value="${len}"> 분</label>
+        <label><b>쉬는 시간</b><input type="number" id="su-brk" min="0" max="30" value="${brk}"> 분</label>
+        <label><b>점심은</b><input type="number" id="su-lafter" min="1" max="8" value="${L.after}"> 교시 다음</label>
+        <label><b>점심시간</b><input type="number" id="su-llen" min="30" max="120" value="${llen}"> 분</label>
+      </div><div id="su-preview" class="muted" style="margin-top:10px"></div>`;
+  } else if(st===3){
+    h+=ttEditor(s)+`<p class="muted" style="margin-top:10px">아직 시간표가 정해지지 않았으면 '다음'을 눌러 넘어가고 나중에 설정에서 넣어도 돼요.</p>`;
+  } else {
+    h+=`<h2>준비 끝! 선생님들을 초대하세요</h2>${inviteBlock(220)}<p class="muted" style="margin-top:10px">QR을 찍고 구글로 로그인한 선생님은 이름과 학년·반만 적으면 바로 들어와요.</p>`;
+  }
+  h+=`<div class="acts" style="justify-content:space-between"><span>${st>0?'<button data-act="su-prev">이전</button>':''} <button class="ghost" data-act="su-skip">나중에 하기</button></span>
+      <button class="pri" data-act="su-next">${st===SETUP_STEPS.length-1?'예약판으로 가기':'다음'}</button></div></div>`;
+  return h;
+}
+function setupTimes(){
+  const g=id=>document.getElementById(id); if(!g('su-n')) return null;
+  const n=Math.max(3,Math.min(8,Number(g('su-n').value)||6)), len=Math.max(20,Math.min(90,Number(g('su-len').value)||40)),
+        brk=Math.max(0,Math.min(30,Number(g('su-brk').value)||0)), la=Math.max(1,Math.min(n,Number(g('su-lafter').value)||4)), ll=Math.max(30,Math.min(120,Number(g('su-llen').value)||50));
+  const [h0,m0]=(g('su-start').value||'09:00').split(':').map(Number); let t=h0*60+m0;
+  const f=x=>pad(Math.floor(x/60))+':'+pad(x%60); const periods=[]; let lunch=null;
+  for(let i=1;i<=n;i++){ periods.push({no:i,start:f(t),end:f(t+len)}); t+=len; if(i===la){ lunch={after:la,start:f(t),end:f(t+ll)}; t+=ll; } else t+=brk; }
+  return {periods,lunch};
+}
+function setupPreview(){ const r=setupTimes(); const el=document.getElementById('su-preview'); if(!r||!el) return;
+  el.innerHTML = r.periods.map(p=>`${p.no}교시 ${p.start}~${p.end}`+(r.lunch&&r.lunch.after===p.no?` · <b>점심 ${r.lunch.start}~${r.lunch.end}</b>`:'')).join('<br>'); }
+document.addEventListener('input', e=>{ if(e.target.id && e.target.id.startsWith('su-')) setupPreview(); });
+async function setupSaveStep(){
+  const st=ui.setupStep||0;
+  if(st===0){
+    const cls=[]; for(let g=1;g<=6;g++){ const n=Math.max(0,Math.min(20,Number(document.querySelector(`[data-gc="${g}"]`).value)||0)); for(let k=1;k<=n;k++) cls.push(g+'-'+k); }
+    const extra=document.getElementById('su-extra').value.split(',').map(x=>x.trim()).filter(Boolean);
+    const all=[...new Set([...cls,...extra])];
+    if(!all.length){ toast('학급을 하나 이상 넣어 주세요.'); return false; }
+    return await act(s=>{ s.school.classes=all; });
+  }
+  if(st===1){
+    const outs={},lun={}; document.querySelectorAll('[data-sout]').forEach(x=>outs[x.dataset.sout]=x.checked); document.querySelectorAll('[data-slunch]').forEach(x=>lun[x.dataset.slunch]=x.checked);
+    if(!S.places.length){ toast('장소를 하나 이상 넣어 주세요.'); return false; }
+    return await act(s=>{ s.places.forEach(p=>{ if(p.id in outs) p.outdoor=outs[p.id]; if(p.id in lun) p.lunch=lun[p.id]; }); });
+  }
+  if(st===2){ const r=setupTimes(); if(!r) return true; return await act(s=>{ s.school.periods=r.periods; s.school.lunch={...(s.school.lunch||{}), ...r.lunch, off:false}; }); }
+  if(st===4) return await act(s=>{ s.school.setupDone=true; });
+  return true;
+}
 /* ----- 내 예약 ----- */
 function renderMine(){
   const today = ymd(now());
@@ -913,12 +998,24 @@ function renderInbox(){
 }
 
 /* ----- 설정 (체육 선생님·관리자) ----- */
+function ttEditor(s){
+  if(!ui.ttPlace || !s.places.some(p=>p.id===ui.ttPlace)) ui.ttPlace = s.places[0] && s.places[0].id;
+  const pes = s.teachers.filter(t=>t.kind==='pe');
+  if(!ui.ttTeacher || !pes.some(t=>t.id===ui.ttTeacher)) ui.ttTeacher = pes[0] ? pes[0].id : ME.id;
+  return `<h2>체육 수업 시간표 (1순위)</h2><p class="muted">한 번 넣어 두면 매주 자동으로 체육 칸이 잡혀요. 칸을 눌러 반을 고르세요. 두 반 이상 고르면 합반 수업이 돼요.</p>
+    <div class="places">${s.places.map(p=>`<button class="${p.id===ui.ttPlace?'on':''}" data-act="ttplace" data-id="${p.id}">${esc(p.name)}</button>`).join('')}</div>
+    ${pes.length>1?`<div class="row" style="margin-bottom:8px"><label class="muted">새로 넣는 칸의 담당</label><select id="tt-teacher">${pes.map(t=>`<option value="${t.id}" ${t.id===ui.ttTeacher?'selected':''}>${esc(t.name)}</option>`).join('')}</select></div>`:''}
+    ${s.school.classes.length?'':`<p class="err">먼저 학급 목록을 넣어 주세요.</p>`}
+    <div style="overflow-x:auto"><table class="tt"><tr><th>교시</th>${[1,2,3,4,5].map(d=>`<th>${DOW[d]}</th>`).join('')}</tr>
+    ${s.school.periods.map(p=>`<tr><th>${p.no}</th>${[1,2,3,4,5].map(d=>{ const cur=s.peTimetable[tkey(ui.ttPlace,d,p.no)]; return `<td class="${cur?'has':''}"><button class="ttbtn" data-act="ttpick" data-tk="${tkey(ui.ttPlace,d,p.no)}">${cur?esc(ttClasses(cur).join('·')):'-'}</button>${cur&&pes.length>1?`<div class="small muted">${esc(tName(s,cur.teacherId))}</div>`:''}</td>`; }).join('')}</tr>`).join('')}
+    </table></div>`;
+}
 function renderSettings(){
   const s=S;
   if(!ui.ttPlace || !s.places.some(p=>p.id===ui.ttPlace)) ui.ttPlace = s.places[0] && s.places[0].id;
   const pes = s.teachers.filter(t=>t.kind==='pe');
   if(!ui.ttTeacher || !pes.some(t=>t.id===ui.ttTeacher)) ui.ttTeacher = pes[0] ? pes[0].id : ME.id;
-  let h = `<div class="card"><h2>선생님 초대</h2>${inviteBlock(180)}</div><div class="card"><h2>학교 정보</h2>
+  let h = `<div class="card row"><div style="flex:1"><h2 style="margin:0">첫 설정 도우미</h2><p class="muted" style="margin:4px 0 0">학급·장소·교시·체육 시간표를 차례대로 넣어요.</p></div><button class="pri" data-act="setup-open">도우미 열기</button></div><div class="card"><h2>선생님 초대</h2>${inviteBlock(180)}</div><div class="card"><h2>학교 정보</h2>
     <div class="field"><label>학교 이름</label><input id="set-name" value="${esc(s.school.name)}"></div>
     <div class="field"><label>학급 목록 (쉼표로 구분, 예: 3-1, 3-2, 4-1)</label><input id="set-classes" value="${esc(s.school.classes.join(', '))}"></div>
     <button class="pri" data-act="save-school">저장</button></div>`;
@@ -944,13 +1041,7 @@ function renderSettings(){
   h += `<div class="card"><h2>장소</h2><p class="muted">학교 사정에 맞게 체육 관련 장소를 더하거나 빼세요. '실외'로 표시한 곳의 수업만 비 오는 날 실내로 옮길 수 있어요.</p><ul class="list">
     ${s.places.map(p=>`<li><input data-pname="${p.id}" value="${esc(p.name)}" style="width:160px"><label class="small"><input type="checkbox" data-pout="${p.id}" ${p.outdoor?'checked':''}> 실외</label><label class="small"><input type="checkbox" data-plunch="${p.id}" ${placeHasLunch(p)?'checked':''}> 점심시간 신청</label><span class="sp"></span><button class="small warn" data-act="place-del" data-id="${p.id}">빼기</button></li>`).join('')}
     </ul><div class="row"><input id="new-place" placeholder="예: 다목적실, 무용실, 탁구장"><label class="small"><input type="checkbox" id="new-place-out"> 실외</label><button data-act="place-add">더하기</button><span class="sp"></span><button class="pri" data-act="save-places">이름·실외 저장</button></div></div>`;
-  h += `<div class="card"><h2>체육 수업 시간표 (1순위)</h2><p class="muted">한 번 넣어 두면 매주 자동으로 체육 칸이 잡혀요. 칸을 눌러 반을 고르세요. 두 반 이상 고르면 합반 수업이 돼요.</p>
-    <div class="places">${s.places.map(p=>`<button class="${p.id===ui.ttPlace?'on':''}" data-act="ttplace" data-id="${p.id}">${esc(p.name)}</button>`).join('')}</div>
-    ${pes.length>1?`<div class="row" style="margin-bottom:8px"><label class="muted">새로 넣는 칸의 담당</label><select id="tt-teacher">${pes.map(t=>`<option value="${t.id}" ${t.id===ui.ttTeacher?'selected':''}>${esc(t.name)}</option>`).join('')}</select></div>`:''}
-    ${s.school.classes.length?'':`<p class="err">먼저 위 '학교 정보'에서 학급 목록을 넣어 주세요.</p>`}
-    <div style="overflow-x:auto"><table class="tt"><tr><th>교시</th>${[1,2,3,4,5].map(d=>`<th>${DOW[d]}</th>`).join('')}</tr>
-    ${s.school.periods.map(p=>`<tr><th>${p.no}</th>${[1,2,3,4,5].map(d=>{ const cur=s.peTimetable[tkey(ui.ttPlace,d,p.no)]; return `<td class="${cur?'has':''}"><button class="ttbtn" data-act="ttpick" data-tk="${tkey(ui.ttPlace,d,p.no)}">${cur?esc(ttClasses(cur).join('·')):'-'}</button>${cur&&pes.length>1?`<div class="small muted">${esc(tName(s,cur.teacherId))}</div>`:''}</td>`; }).join('')}</tr>`).join('')}
-    </table></div></div>`;
+  h += `<div class="card">${ttEditor(s)}</div>`;
   h += `<div class="card"><h2>선생님</h2><ul class="list">
     ${s.teachers.map(t=>`<li><b>${esc(t.name)}</b><span class="muted">${kindLabel(t)}${t.cls?' · '+esc(t.cls):''}${t.admin?' · 관리자':''}${t.email?' · '+esc(t.email):''}</span><span class="sp"></span>
       ${t.id!==ME.id?`${ME.admin?`<button class="small" data-act="t-admin" data-id="${t.id}">${t.admin?'관리자 해제':'관리자로'}</button>`:''}${(ME.admin || !t.admin)?`<button class="small warn" data-act="t-del" data-id="${t.id}">내보내기</button>`:''}`:''}</li>`).join('')}
@@ -1004,7 +1095,7 @@ function registerForm(){
     <button class="pri" data-act="rg-go">등록하고 들어가기</button> ${DEMO?`<button data-act="demo-back">뒤로</button>`:`<button data-act="to-code">다른 학교</button>`}<div id="err" class="err"></div>`;
 }
 function showErr(t){ const e=document.getElementById('err'); if(e) e.textContent=t; else toast(t); }
-function login(t){ ME=t; if(S && (!ui.place || !S.places.some(p=>p.id===ui.place))) ui.place = S.places[0] && S.places[0].id; if(DEMO) safeSet('jjim:session', JSON.stringify({code:ui.code, id:t.id})); ui.view='board'; ui.loginStep='in'; ui.modal=null; if(ui.freshInvite){ ui.freshInvite=false; ui.modal={type:'invite',fresh:true}; } render(); }
+function login(t){ ME=t; if(S && (!ui.place || !S.places.some(p=>p.id===ui.place))) ui.place = S.places[0] && S.places[0].id; if(DEMO) safeSet('jjim:session', JSON.stringify({code:ui.code, id:t.id})); ui.view='board'; ui.loginStep='in'; ui.modal=null; if(ui.freshSetup){ ui.freshSetup=false; ui.view='setup'; ui.setupStep=0; } render(); }
 
 /* ============================================================
    눌렀을 때
@@ -1084,6 +1175,17 @@ document.addEventListener('click', async e=>{
       if(await act(s=>{ s.places.forEach(p=>{ if(names[p.id]) p.name=names[p.id]; if(p.id in outs) p.outdoor=outs[p.id]; if(p.id in lun) p.lunch=lun[p.id]; }); })) toast('저장했어요.');
       break; }
     case 'ttplace': ui.ttPlace=id; render(); break;
+    case 'setup-open': ui.view='setup'; ui.setupStep=0; ui.modal=null; render(); window.scrollTo(0,0); break;
+    case 'su-next': if(await setupSaveStep()){ if((ui.setupStep||0)>=SETUP_STEPS.length-1){ ui.view='board'; render(); toast('설정을 마쳤어요.'); } else { ui.setupStep=(ui.setupStep||0)+1; render(); setupPreview(); window.scrollTo(0,0); } } break;
+    case 'su-prev': ui.setupStep=Math.max(0,(ui.setupStep||0)-1); render(); setupPreview(); break;
+    case 'su-skip': ui.view='board'; render(); break;
+    case 'su-place': { const n=b.dataset.n, pr=PLACE_PRESETS.find(x=>x[0]===n);
+      await act(s=>{ const ex=s.places.find(p=>p.name===n);
+        if(ex){ if(s.places.length<=1) return {error:'장소가 하나는 있어야 해요.'}; s.places=s.places.filter(p=>p.id!==ex.id); for(const box of ['peTimetable','bookings','releases','bids','rain']) for(const kk in s[box]) if(kk.split('|')[0]===ex.id) delete s[box][kk]; }
+        else s.places.push({id:'p_'+uid(), name:n, outdoor:pr[1], lunch:pr[2]}); }); break; }
+    case 'su-place-add': { const n=document.getElementById('su-newplace').value.trim(); if(!n) return toast('장소 이름을 넣어 주세요.');
+      await act(s=>{ if(s.places.some(p=>p.name===n)) return {error:'같은 이름의 장소가 있어요.'}; s.places.push({id:'p_'+uid(),name:n,outdoor:false,lunch:false}); }); break; }
+    case 'su-place-del': await act(s=>{ if(s.places.length<=1) return {error:'장소가 하나는 있어야 해요.'}; s.places=s.places.filter(p=>p.id!==id); for(const box of ['peTimetable','bookings','releases','bids','rain']) for(const kk in s[box]) if(kk.split('|')[0]===id) delete s[box][kk]; }); break;
     case 'ttpick': ui.modal={type:'ttpick', tk:b.dataset.tk}; renderModal(); break;
     case 'tt-save': case 'tt-clear': {
       const tk=b.dataset.tk, cs = a==='tt-clear' ? [] : [...document.querySelectorAll('[data-ttc]:checked')].map(x=>x.dataset.ttc);
@@ -1143,7 +1245,7 @@ document.addEventListener('click', async e=>{
       let code='', st=null;
       for(let i=0;i<6;i++){ const c=genCode(); const t=new FireStore(c); if(!(await t.exists())){ code=c; st=t; break; } }
       if(!st) return showErr('학교 코드를 만들지 못했어요. 다시 눌러 주세요.');
-      ui.freshInvite=true;
+      ui.freshSetup=true;
       const s0=emptySchool(name);
       s0.teachers.push({id:AUTH.uid, name:me, kind:'pe', cls:'', admin:true, email:AUTH.email||''});
       await st.create(s0); safeSet('jjim:lastcode', code);
