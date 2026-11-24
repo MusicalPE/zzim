@@ -213,6 +213,10 @@ table.grid.one{min-width:0}
 .gradegrid input[type=number]{width:70px}
 .presetrow{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}
 .setup-nudge{border-color:#f2c230}
+.startcard{display:flex;flex-direction:column;align-items:flex-start;gap:4px;width:100%;text-align:left;border-radius:14px;padding:14px 16px;margin-bottom:10px;border-color:#d6d3c9}
+.startcard:hover{border-color:var(--ink)}
+.startcard b{font-size:16px}.startcard span{font-size:13px;color:var(--sub);font-weight:400}
+.startcard:first-of-type{border-color:var(--red)}
 .choice{display:flex;gap:8px;align-items:center;width:100%;text-align:left;margin-bottom:6px;border-radius:12px}
 </style>
 </head>
@@ -240,7 +244,7 @@ const FIREBASE_CONFIG = {
   storageBucket: "...", messagingSenderId: "...", appId: "..."
 };
 */
-const VERSION = '1.7.1';
+const VERSION = '1.8.0';
 const BETA = true;            // 시험판 표시 (앱 모음에 공개할 때 false 로)
 const FEEDBACK_URL = 'https://musicalpe.github.io/hearim/?p=vcxwx2';      // 의견 받기 설문 주소 (헤아림). 비어 있으면 '의견 보내기' 단추가 숨겨짐
 const DOW = ['일','월','화','수','목','금','토'];
@@ -902,10 +906,11 @@ function kindLabel(t){ return t.kind==='pe'?'체육':t.kind==='homeroom'?'담임
 /* ----- 첫 설정 도우미 ----- */
 const SETUP_STEPS=['학급','장소','교시','체육 시간표','선생님 초대'];
 const PLACE_PRESETS=[['강당',false,true],['운동장',true,false],['체육관',false,true],['다목적실',false,false],['무용실',false,false],['탁구장',false,false]];
+function stepBar(cur){ const all=['학교 만들기',...SETUP_STEPS]; return `<div class="steps">${all.map((n,i)=>`<span class="${i===cur?'on':i<cur?'done':''}">${i+1}. ${n}</span>`).join('')}</div>`; }
 function renderSetup(){
   if(!canManage(ME)) return `<div class="card">체육 선생님만 열 수 있어요.</div>`;
   const st=ui.setupStep||0, s=S;
-  let h=`<div class="card"><div class="steps">${SETUP_STEPS.map((n,i)=>`<span class="${i===st?'on':i<st?'done':''}">${i+1}. ${n}</span>`).join('')}</div>`;
+  let h=`<div class="card">${stepBar(st+1)}`;
   if(st===0){
     const cnt={}; let extra=[];
     for(const c of s.school.classes){ const m=c.match(/^([1-6])-(\d+)$/); if(m) cnt[m[1]]=Math.max(cnt[m[1]]||0, Number(m[2])); else extra.push(c); }
@@ -1072,13 +1077,17 @@ function renderLogin(){
   } else if(ui.loginStep==='boot' || ui.loginStep==='loading'){
     h += `<p>불러오는 중...</p>`;
   } else if(ui.loginStep==='signin'){
-    h += `<h2>들어가기</h2><p class="muted">${ui.inviteCode?'우리 학교 예약판에 초대받았어요. ':''}학교 선생님 모두 각자 구글 계정으로 들어와요.</p><button class="pri" data-act="google">구글 계정으로 로그인</button>`;
+    if(ui.inviteCode) h += `<h2>우리 학교 예약판에 초대받았어요</h2><p class="muted">구글 계정으로 로그인하면 이름과 학년·반만 적고 바로 들어가요.</p><button class="pri" data-act="google" data-intent="join">구글 계정으로 로그인</button>`;
+    else h += `<h2>어떻게 시작할까요?</h2><p class="muted">학교 선생님 모두 각자 구글 계정으로 들어와요.</p>
+      <button class="startcard" data-act="google" data-intent="create"><b>처음 써 봐요 · 우리 학교 만들기</b><span>체육 선생님이 학교를 만들고, 학급·장소·교시·체육 시간표를 차례대로 넣어요.</span></button>
+      <button class="startcard" data-act="google" data-intent="join"><b>초대받았어요 · 우리 학교로 들어가기</b><span>체육 선생님께 받은 QR을 찍거나 학교 코드를 넣어 들어가요.</span></button>
+      <p class="muted" style="margin-top:10px">어느 쪽이든 먼저 구글 로그인 창이 떠요.</p>`;
   } else if(ui.loginStep==='code'){
     h += `<h2>학교 코드</h2>${acct}<div class="field"><input id="in-code" placeholder="학교 코드 (영문·숫자)" value="${esc(ui.code)}"></div>
       <button class="pri" data-act="code-go">들어가기</button> <button data-act="new-school">우리 학교 처음 만들기</button><div id="err" class="err"></div>
       <p class="muted" style="margin-top:12px">체육 선생님께 받은 초대 QR을 찍으면 코드 없이 바로 들어와요.</p>`;
   } else if(ui.loginStep==='newschool'){
-    h += `<h2>우리 학교 만들기</h2>${acct}<p class="muted">만든 사람이 관리자(체육 선생님)가 돼요. 학교 코드는 자동으로 만들어지고, 다른 선생님들은 QR로 들어와요.</p>
+    h += `${stepBar(0)}<h2>우리 학교 만들기</h2>${acct}<p class="muted">만든 사람이 관리자(체육 선생님)가 돼요. 학교 코드는 자동으로 만들어지고, 다른 선생님들은 QR로 들어와요.</p>
       <div class="field"><label>학교 이름</label><input id="ns-name"></div>
       <div class="field"><label>내 이름</label><input id="ns-me" value="${esc(AUTH&&AUTH.displayName||'')}"></div>
       <button class="pri" data-act="ns-go">만들기</button> <button data-act="to-code">뒤로</button><div id="err" class="err"></div>`;
@@ -1230,7 +1239,7 @@ document.addEventListener('click', async e=>{
     case 'demo-back': ui.loginStep='pick'; render(); break;
 
     /* 로그인 */
-    case 'google': await googleSignIn(); break;
+    case 'google': ui.intent=b.dataset.intent||'join'; safeSet('jjim:intent', ui.intent); await googleSignIn(); break;
     case 'signout': await signOutAll(); break;
     case 'code-go': {
       const code=document.getElementById('in-code').value.trim().toLowerCase();
@@ -1316,7 +1325,8 @@ setInterval(()=>{ if(S) onState(S); }, 60000);
       ui.loginStep='code'; render(); showErr(ui.inviteCode? '초대 주소의 학교를 찾을 수 없어요. 체육 선생님께 QR을 다시 받아 주세요.' : '지난번 학교를 찾을 수 없어요. 학교 코드를 넣어 주세요.');
       return;
     }
-    ui.loginStep='code'; render();
+    const intent = ui.intent || safeGet('jjim:intent'); safeDel('jjim:intent'); ui.intent=null;
+    ui.loginStep = intent==='create' ? 'newschool' : 'code'; render();
   });
 })();
 </script>
