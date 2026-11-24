@@ -244,7 +244,7 @@ const FIREBASE_CONFIG = {
   storageBucket: "...", messagingSenderId: "...", appId: "..."
 };
 */
-const VERSION = '1.8.0';
+const VERSION = '1.8.1';
 const BETA = true;            // 시험판 표시 (앱 모음에 공개할 때 false 로)
 const FEEDBACK_URL = 'https://musicalpe.github.io/hearim/?p=vcxwx2';      // 의견 받기 설문 주소 (헤아림). 비어 있으면 '의견 보내기' 단추가 숨겨짐
 const DOW = ['일','월','화','수','목','금','토'];
@@ -608,6 +608,9 @@ class LocalStore{
   emit(){ const s=this.read(); this.subs.forEach(cb=>cb(s)); }
 }
 
+/* 계정마다 들어간 학교 코드를 기억: jjimUsers/{uid} */
+async function getMySchool(){ try{ const d=await firebase.firestore().collection('jjimUsers').doc(AUTH.uid).get(); return d.exists ? (d.data()||{}).code : null; }catch(e){ return null; } }
+function saveMySchool(code){ try{ if(!DEMO && AUTH && code) firebase.firestore().collection('jjimUsers').doc(AUTH.uid).set({code, at:Date.now()}).catch(()=>{}); }catch(e){} }
 class FireStore{
   constructor(code){ this.code=code; this.ref=firebase.firestore().collection('jjim').doc(code); }
   async exists(){ const d=await this.ref.get(); return d.exists; }
@@ -1077,11 +1080,12 @@ function renderLogin(){
   } else if(ui.loginStep==='boot' || ui.loginStep==='loading'){
     h += `<p>불러오는 중...</p>`;
   } else if(ui.loginStep==='signin'){
-    if(ui.inviteCode) h += `<h2>우리 학교 예약판에 초대받았어요</h2><p class="muted">구글 계정으로 로그인하면 이름과 학년·반만 적고 바로 들어가요.</p><button class="pri" data-act="google" data-intent="join">구글 계정으로 로그인</button>`;
-    else h += `<h2>어떻게 시작할까요?</h2><p class="muted">학교 선생님 모두 각자 구글 계정으로 들어와요.</p>
-      <button class="startcard" data-act="google" data-intent="create"><b>처음 써 봐요 · 우리 학교 만들기</b><span>체육 선생님이 학교를 만들고, 학급·장소·교시·체육 시간표를 차례대로 넣어요.</span></button>
-      <button class="startcard" data-act="google" data-intent="join"><b>초대받았어요 · 우리 학교로 들어가기</b><span>체육 선생님께 받은 QR을 찍거나 학교 코드를 넣어 들어가요.</span></button>
-      <p class="muted" style="margin-top:10px">어느 쪽이든 먼저 구글 로그인 창이 떠요.</p>`;
+    if(ui.inviteCode) h += `<h2>우리 학교 예약판에 초대받았어요</h2><p class="muted">구글 계정으로 로그인하면 이름과 학년·반만 적고 바로 들어가요.</p><button class="pri" data-act="google">구글 계정으로 로그인</button>`;
+    else h += `<h2>들어가기</h2><p class="muted">학교 선생님 모두 각자 구글 계정으로 들어와요. 이미 쓰고 계셨다면 어느 기기에서든 로그인만 하면 우리 학교로 바로 들어가요.</p><button class="pri" data-act="google">구글 계정으로 로그인</button>`;
+  } else if(ui.loginStep==='start'){
+    h += `<h2>어떻게 시작할까요?</h2>${acct}
+      <button class="startcard" data-act="start-create"><b>처음 써 봐요 · 우리 학교 만들기</b><span>체육 선생님이 학교를 만들고, 학급·장소·교시·체육 시간표를 차례대로 넣어요.</span></button>
+      <button class="startcard" data-act="start-join"><b>초대받았어요 · 우리 학교로 들어가기</b><span>체육 선생님께 받은 QR을 찍거나 학교 코드를 넣어 들어가요.</span></button>`;
   } else if(ui.loginStep==='code'){
     h += `<h2>학교 코드</h2>${acct}<div class="field"><input id="in-code" placeholder="학교 코드 (영문·숫자)" value="${esc(ui.code)}"></div>
       <button class="pri" data-act="code-go">들어가기</button> <button data-act="new-school">우리 학교 처음 만들기</button><div id="err" class="err"></div>
@@ -1108,7 +1112,7 @@ function registerForm(){
     <button class="pri" data-act="rg-go">등록하고 들어가기</button> ${DEMO?`<button data-act="demo-back">뒤로</button>`:`<button data-act="to-code">다른 학교</button>`}<div id="err" class="err"></div>`;
 }
 function showErr(t){ const e=document.getElementById('err'); if(e) e.textContent=t; else toast(t); }
-function login(t){ ME=t; if(S && (!ui.place || !S.places.some(p=>p.id===ui.place))) ui.place = S.places[0] && S.places[0].id; if(DEMO) safeSet('jjim:session', JSON.stringify({code:ui.code, id:t.id})); ui.view='board'; ui.loginStep='in'; ui.modal=null; if(ui.freshSetup){ ui.freshSetup=false; ui.view='setup'; ui.setupStep=0; } render(); }
+function login(t){ ME=t; saveMySchool(ui.code); if(S && (!ui.place || !S.places.some(p=>p.id===ui.place))) ui.place = S.places[0] && S.places[0].id; if(DEMO) safeSet('jjim:session', JSON.stringify({code:ui.code, id:t.id})); ui.view='board'; ui.loginStep='in'; ui.modal=null; if(ui.freshSetup){ ui.freshSetup=false; ui.view='setup'; ui.setupStep=0; } render(); }
 
 /* ============================================================
    눌렀을 때
@@ -1239,7 +1243,9 @@ document.addEventListener('click', async e=>{
     case 'demo-back': ui.loginStep='pick'; render(); break;
 
     /* 로그인 */
-    case 'google': ui.intent=b.dataset.intent||'join'; safeSet('jjim:intent', ui.intent); await googleSignIn(); break;
+    case 'google': await googleSignIn(); break;
+    case 'start-create': ui.loginStep='newschool'; render(); break;
+    case 'start-join': ui.loginStep='code'; render(); break;
     case 'signout': await signOutAll(); break;
     case 'code-go': {
       const code=document.getElementById('in-code').value.trim().toLowerCase();
@@ -1325,8 +1331,11 @@ setInterval(()=>{ if(S) onState(S); }, 60000);
       ui.loginStep='code'; render(); showErr(ui.inviteCode? '초대 주소의 학교를 찾을 수 없어요. 체육 선생님께 QR을 다시 받아 주세요.' : '지난번 학교를 찾을 수 없어요. 학교 코드를 넣어 주세요.');
       return;
     }
-    const intent = ui.intent || safeGet('jjim:intent'); safeDel('jjim:intent'); ui.intent=null;
-    ui.loginStep = intent==='create' ? 'newschool' : 'code'; render();
+    ui.loginStep='loading'; render();
+    const mine = await getMySchool();
+    if(mine){ let ex=false; try{ ex = await new FireStore(mine).exists(); }catch(e){}
+      if(ex){ ui.code=mine; safeSet('jjim:lastcode', mine); await openSchool(mine); return; } }
+    ui.loginStep='start'; render();
   });
 })();
 </script>

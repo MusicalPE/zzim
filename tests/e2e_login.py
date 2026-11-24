@@ -20,12 +20,14 @@ async def main():
             await r.fulfill(status=200, content_type='application/javascript', body=body)
         await pg.route('**/www.gstatic.com/**', route)
         await pg.goto(FB.as_uri()+'?test=1'); await pg.wait_for_timeout(500)
-        ok('우리 학교 만들기' in await pg.inner_text('#app') and await pg.locator('.startcard').count()==2,'처음: 시작 방법 두 갈래')
+        ok('구글 계정으로 로그인' in await pg.inner_text('#app') and await pg.locator('.startcard').count()==0,'처음: 로그인 단추 하나')
+        await pg.evaluate("window.__fakeUser={uid:'uZ',displayName:'새손님',email:'z@x.com'}"); await pg.click('[data-act=google]'); await pg.wait_for_timeout(400)
+        ok(await pg.locator('.startcard').count()==2,'처음 온 계정: 로그인 뒤 두 갈래')
+        await pg.click('[data-act=signout]'); await pg.wait_for_timeout(300)
         async def signin(uid,name,email,intent='join'):
             await pg.evaluate(f"window.__fakeUser={{uid:'{uid}',displayName:'{name}',email:'{email}'}}")
-            sel=f'[data-act=google][data-intent={intent}]'
-            if await pg.locator(sel).count()==0: sel='[data-act=google]'
-            await pg.click(sel); await pg.wait_for_timeout(300)
+            await pg.click('[data-act=google]'); await pg.wait_for_timeout(400)
+            if await pg.locator('.startcard').count(): await pg.click(f'[data-act=start-{intent}]'); await pg.wait_for_timeout(200)
         await signin('uA','김체육','pe@x.com')
         ok('학교 코드' in await pg.inner_text('#app'),'로그인 뒤 학교 코드 화면')
         await pg.fill('#in-code','nope1234'); await pg.click('[data-act=code-go]'); await pg.wait_for_timeout(200)
@@ -67,7 +69,7 @@ async def main():
         ok(await pg.locator('[data-act=view][data-v=settings]').count()==1,'만든 사람은 설정 보임')
         # 나가기 → 담임 B 로그인
         await pg.click('[data-act=signout]'); await pg.wait_for_timeout(300)
-        ok(await pg.locator('.startcard').count()==2,'나가기 하면 구글 로그아웃')
+        ok('구글 계정으로 로그인' in await pg.inner_text('#app'),'나가기 하면 구글 로그아웃')
         await signin('uB','이담임','b@x.com'); await pg.wait_for_timeout(300)
         txt=await pg.inner_text('#app')
         ok('처음 오셨네요' in txt,'지난 학교 코드 기억 → 바로 등록 화면')
@@ -122,6 +124,12 @@ async def main():
         await pg.goto(FB.as_uri()+'?test=1&school=zzzzzz'); await pg.wait_for_timeout(500)
         await signin('uE','누구','e@x.com'); await pg.wait_for_timeout(400)
         ok('찾을 수 없어요' in await pg.inner_text('#app'),'없는 초대 코드 안내')
+        # 다른 기기(학교 코드 기억 없음)에서 이미 쓰던 계정 → 바로 우리 학교
+        await pg.click('[data-act=signout]') if await pg.locator('[data-act=signout]').count() else None
+        await pg.wait_for_timeout(200); await pg.evaluate("localStorage.clear()")
+        await pg.goto(FB.as_uri()+'?test=1'); await pg.wait_for_timeout(500)
+        await pg.evaluate("window.__fakeUser={uid:'uB',displayName:'이담임',email:'b@x.com'}"); await pg.click('[data-act=google]'); await pg.wait_for_timeout(600)
+        ok(await pg.locator('table.grid').count()==1 and await pg.locator('.startcard').count()==0,'다른 기기에서도 이미 쓰던 계정은 바로 우리 학교')
         # '처음 써 봐요'로 시작하면 코드 화면 없이 바로 학교 만들기
         await pg.click('[data-act=signout]'); await pg.wait_for_timeout(200)
         await pg.evaluate("localStorage.removeItem('jjim:lastcode')")
